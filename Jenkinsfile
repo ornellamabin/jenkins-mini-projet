@@ -1,57 +1,63 @@
 pipeline {
     agent {
         docker {
-            image 'maven:3.9.2-eclipse-temurin-17' // Maven + Java 17
-            args '-v $HOME/.m2:/root/.m2' // Pour cacher les dépendances Maven entre builds
+            image 'maven:3.9.2-eclipse-temurin-17'
+            args '-v /var/jenkins_home/.m2:/root/.m2'
         }
     }
 
     environment {
-        PROJECT_DIR = '/app'
+        PROJECT_NAME = 'jenkins-mini-projet'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Récupération du code source
-                checkout scm
+                echo '🔄 Clonage du dépôt Git'
+                git branch: 'main', url: 'https://github.com/ornellamabin/jenkins-mini-projet.git'
             }
         }
 
         stage('Build') {
             steps {
-                dir("${PROJECT_DIR}") {
-                    sh 'mvn clean package -DskipTests'
-                }
+                echo '⚙️ Compilation et tests Maven'
+                sh 'mvn clean install'
             }
         }
 
-        stage('Test') {
+        stage('Run Application') {
             steps {
-                dir("${PROJECT_DIR}") {
-                    sh 'mvn test'
-                }
-            }
-            post {
-                always {
-                    junit '**/target/surefire-reports/*.xml'
-                }
+                echo '🚀 Lancement du projet Spring Boot'
+                sh 'mvn spring-boot:run &'
             }
         }
 
-        stage('Archive') {
+        stage('Dockerize') {
             steps {
-                archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+                echo '🐳 Construction de l’image Docker de l’application'
+                sh """
+                   docker build -t ${PROJECT_NAME}:latest .
+                """
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                echo '🧹 Nettoyage du workspace'
+                sh 'mvn clean'
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline terminée avec succès pour la branche ${env.BRANCH_NAME}"
+            echo '✅ Pipeline terminé avec succès'
         }
         failure {
-            echo "La pipeline a échoué pour la branche ${env.BRANCH_NAME}"
+            echo '❌ La pipeline a échoué'
+        }
+        always {
+            echo '🔚 Pipeline terminée'
         }
     }
 }
