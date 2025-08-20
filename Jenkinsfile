@@ -52,7 +52,7 @@ pipeline {
                     sh '''
                         cd springbootapp
                         mvn sonar:sonar \
-                            -Dsonar.projectKey=springboot-app \
+                            -Dsonar.projectKey=jenkins-mini-projet \
                             -Dsonar.organization=ornellamabin \
                             -Dsonar.login=$SONAR_TOKEN \
                             -Dsonar.host.url=https://sonarcloud.io
