@@ -26,7 +26,13 @@ pipeline {
         stage('Analyse Qualité avec SonarCloud') {
             steps {
                 withSonarQubeEnv('sonarcloud') {
-                    sh 'mvn sonar:sonar -Dsonar.projectKey=ton-project-key -Dsonar.login=$SONAR_TOKEN'
+                    sh """
+                mvn clean verify sonar:sonar \
+                -Dsonar.projectKey=ton-projet-key \
+                -Dsonar.organization=ton-organisation \
+                -Dsonar.host.url=https://sonarcloud.io \
+                -Dsonar.login=${SONAR_AUTH_TOKEN}
+            """
                 }
             }
         }
