@@ -18,48 +18,43 @@ pipeline {
                 // DEBUG: Vérifier la structure
                 sh '''
                     echo "=== STRUCTURE DES FICHIERS ==="
-                    find . -name "pom.xml" -type f
+                    pwd
+                    ls -la
+                    echo "=== SOUS-DOSSIERS ==="
                     ls -la */
+                    echo "=== RECHERCHE POM.XML ==="
+                    find . -name "pom.xml" -type f
                 '''
             }
         }
         
-        // Étape 2: Se déplacer dans le bon dossier
-        stage('Changer de répertoire') {
-            steps {
-                dir('springbootapp') {  // ← CHANGEMENT ICI
-                    sh 'pwd && ls -la'
-                }
-            }
-        }
-        
-        // Étape 3: Compilation (DANS LE BON DOSSIER)
+        // Étape 2: Compilation (DANS LE BON DOSSIER)
         stage('Compilation') {
             steps {
-                dir('springbootapp') {  // ← CHANGEMENT ICI
+                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
                     sh 'mvn clean compile'
                 }
             }
         }
         
-        // Étape 4: Tests Unitaires (DANS LE BON DOSSIER)
+        // Étape 3: Tests Unitaires (DANS LE BON DOSSIER)
         stage('Tests Unitaires') {
             steps {
-                dir('springbootapp') {  // ← CHANGEMENT ICI
+                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
                     sh 'mvn test'
                 }
             }
             post {
                 always {
-                    junit 'springbootapp/target/surefire-reports/*.xml'  // ← CHEMODIFIÉ
+                    junit 'springbootapp/target/surefire-reports/*.xml'
                 }
             }
         }
         
-        // Étape 5: Analyse SonarCloud (DANS LE BON DOSSIER)
+        // Étape 4: Analyse SonarCloud (DANS LE BON DOSSIER)
         stage('Analyse SonarCloud') {
             steps {
-                dir('springbootapp') {  // ← CHANGEMENT ICI
+                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
                     withSonarQubeEnv('sonarcloud') {
                         sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true'
                     }
@@ -67,12 +62,12 @@ pipeline {
             }
         }
         
-        // Étape 6: Packaging (DANS LE BON DOSSIER)
+        // Étape 5: Packaging (DANS LE BON DOSSIER)
         stage('Packaging') {
             steps {
-                dir('springbootapp') {  // ← CHANGEMENT ICI
+                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
                     sh 'mvn package -DskipTests'
-                    archiveArtifacts 'target/*.jar'
+                    archiveArtifacts 'springbootapp/target/*.jar'
                 }
             }
         }
