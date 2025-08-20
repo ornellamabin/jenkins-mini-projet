@@ -9,51 +9,71 @@ pipeline {
     }
     
     stages {
-        // Étape 1: Checkout du code avec vérification
+        // Étape 1: Checkout du code
         stage('Checkout Code') {
             steps {
                 git branch: 'main', 
                 url: 'https://github.com/ornellamabin/jenkins-mini-projet.git'
                 
-                // Debug: vérifier les fichiers
-                sh 'ls -la'
-                sh 'find . -name "pom.xml"'
+                // DEBUG: Vérifier la structure
+                sh '''
+                    echo "=== STRUCTURE DES FICHIERS ==="
+                    find . -name "pom.xml" -type f
+                    ls -la */
+                '''
             }
         }
         
-        // Étape 2: Compilation
+        // Étape 2: Se déplacer dans le bon dossier
+        stage('Changer de répertoire') {
+            steps {
+                dir('springbootapp') {  // ← CHANGEMENT ICI
+                    sh 'pwd && ls -la'
+                }
+            }
+        }
+        
+        // Étape 3: Compilation (DANS LE BON DOSSIER)
         stage('Compilation') {
             steps {
-                sh 'mvn clean compile'
+                dir('springbootapp') {  // ← CHANGEMENT ICI
+                    sh 'mvn clean compile'
+                }
             }
         }
         
-        // Étape 3: Tests Unitaires
+        // Étape 4: Tests Unitaires (DANS LE BON DOSSIER)
         stage('Tests Unitaires') {
             steps {
-                sh 'mvn test'
+                dir('springbootapp') {  // ← CHANGEMENT ICI
+                    sh 'mvn test'
+                }
             }
             post {
                 always {
-                    junit 'target/surefire-reports/*.xml'
+                    junit 'springbootapp/target/surefire-reports/*.xml'  // ← CHEMODIFIÉ
                 }
             }
         }
         
-        // Étape 4: Analyse SonarCloud
+        // Étape 5: Analyse SonarCloud (DANS LE BON DOSSIER)
         stage('Analyse SonarCloud') {
             steps {
-                withSonarQubeEnv('sonarcloud') {
-                    sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true'
+                dir('springbootapp') {  // ← CHANGEMENT ICI
+                    withSonarQubeEnv('sonarcloud') {
+                        sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true'
+                    }
                 }
             }
         }
         
-        // Étape 5: Packaging
+        // Étape 6: Packaging (DANS LE BON DOSSIER)
         stage('Packaging') {
             steps {
-                sh 'mvn package -DskipTests'
-                archiveArtifacts 'target/*.jar'
+                dir('springbootapp') {  // ← CHANGEMENT ICI
+                    sh 'mvn package -DskipTests'
+                    archiveArtifacts 'target/*.jar'
+                }
             }
         }
     }
@@ -62,12 +82,6 @@ pipeline {
         always {
             echo "Build ${currentBuild.currentResult} - Voir les détails: ${env.BUILD_URL}"
             cleanWs()
-        }
-        success {
-            echo "🎉 Pipeline réussi! Application compilée et testée."
-        }
-        failure {
-            echo "❌ Pipeline échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
