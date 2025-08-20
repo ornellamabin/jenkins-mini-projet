@@ -9,46 +9,29 @@ pipeline {
     }
     
     stages {
-        // Étape 1: Checkout et vérification
         stage('Checkout et Vérification') {
             steps {
                 git branch: 'main', 
                 url: 'https://github.com/ornellamabin/jenkins-mini-projet.git'
                 
-                // DEBUG COMPLET
                 sh '''
-                    echo "=== CONTENU DU WORKSPACE ==="
+                    echo "=== STRUCTURE ==="
                     pwd
                     ls -la
-                    echo "=== STRUCTURE COMPLÈTE ==="
-                    find . -name "pom.xml" -type f
-                    echo "=== SOUS-DOSSIERS EXISTANTS ==="
-                    ls -la */
+                    find . -name pom.xml
                 '''
             }
         }
         
-        // Étape 2: Compilation DANS springbootapp
         stage('Compilation') {
             steps {
                 sh '''
-                    echo "=== TENTATIVE DE COMPILATION ==="
-                    if [ -d "springbootapp" ] && [ -f "springbootapp/pom.xml" ]; then
-                        echo "✅ springbootapp/pom.xml trouvé!"
-                        cd springbootapp
-                        mvn clean compile
-                    else
-                        echo "❌ ERREUR: springbootapp/pom.xml introuvable!"
-                        echo "Structure actuelle:"
-                        ls -la
-                        find . -name "*.xml"
-                        exit 1
-                    fi
+                    cd springbootapp
+                    mvn clean compile
                 '''
             }
         }
         
-        // Étape 3: Tests Unitaires
         stage('Tests Unitaires') {
             steps {
                 sh '''
@@ -58,21 +41,20 @@ pipeline {
             }
             post {
                 always {
-                  //  junit '**/surefire-reports/*.xml'
+                    junit 'springbootapp/target/surefire-reports/*.xml'
+                }
             }
         }
         
-        // Étape 4: Analyse SonarCloud
         stage('Analyse SonarCloud') {
             steps {
                 sh '''
                     cd springbootapp
-                    mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true
+                    mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN
                 '''
             }
         }
         
-        // Étape 5: Packaging
         stage('Packaging') {
             steps {
                 sh '''
@@ -86,7 +68,7 @@ pipeline {
     
     post {
         always {
-            echo "Build ${currentBuild.currentResult} - Voir les détails: ${env.BUILD_URL}"
+            echo "Build ${currentBuild.currentResult}"
             cleanWs()
         }
     }
