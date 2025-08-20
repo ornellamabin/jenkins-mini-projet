@@ -58,8 +58,7 @@ pipeline {
             }
             post {
                 always {
-                    junit 'springbootapp/target/surefire-reports/*.xml'
-                }
+                  //  junit '**/surefire-reports/*.xml'
             }
         }
         
