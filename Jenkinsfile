@@ -48,10 +48,16 @@ pipeline {
         
         stage('Analyse SonarCloud') {
             steps {
-                sh '''
-                    cd springbootapp
-                    mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN
-                '''
+                withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        cd springbootapp
+                        mvn sonar:sonar \
+                            -Dsonar.projectKey=springboot-app \
+                            -Dsonar.organization=ornellamabin \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.host.url=https://sonarcloud.io
+                    '''
+                }
             }
         }
         
