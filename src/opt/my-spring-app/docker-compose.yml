@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  my-spring-app:
+    image: gseha/my-spring-app:latest # L'image poussée par Jenkins
+    container_name: my-spring-app-prod
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+# Ajoutez d'autres services si nécessaire (comme une base de données)

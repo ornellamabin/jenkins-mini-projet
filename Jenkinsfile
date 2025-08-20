@@ -17,8 +17,8 @@ pipeline {
                 sh 'mvn clean compile test'
             }
             post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
+                success {
+                    echo "Pas de tests à archiver"
                 }
             }
         }
