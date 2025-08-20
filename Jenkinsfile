@@ -92,7 +92,7 @@ pipeline {
     
     post {
         always {
-            slackSend(
+             slackSend(
                 channel: '#ton-channel',
                 message: "Build ${currentBuild.result ?: 'SUCCESS'} - Job ${env.JOB_NAME} [${env.BUILD_NUMBER}] (<${env.BUILD_URL}|Open>)"
             )
