@@ -1,27 +1,33 @@
 pipeline {
     // Exécute toutes les étapes dans un conteneur Docker avec Maven
-    agent {
-        docker {
-            image 'maven:3.8.6-openjdk-17'
-            args '-v /root/.m2:/root/.m2' // Cache Maven pour accélérer les builds
-        }
-    }
-    
+    agent any
+
     // Définition des variables d'environnement (secrets)
     environment {
         DOCKERHUB_CREDS = credentials('dockerhub-creds') // Identifiants DockerHub
         SONAR_TOKEN = credentials('sonarcloud-token')     // Token SonarCloud
         SLACK_WEBHOOK = credentials('slack-token')        // Webhook Slack
+        
     }
+    
+    
+    
     
     stages {
         // Étape 1: Récupération du code source
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/tonuser/ton-repo.git' // REMPLACE par ton URL GitHub
+                git branch: 'main', url: 'https://github.com/ornellamabin/jenkins-mini-projet.git' // REMPLACE par ton URL GitHub
             }
         }
         
+    stage('Setup Docker') {
+            steps {
+                script {
+                    // Vérifie que Docker est disponible
+                    sh 'docker --version'
+                }
+            }
         // Étape 2: Compilation et tests unitaires
         stage('Build & Tests Unitaires') {
             steps {
@@ -116,5 +122,7 @@ pipeline {
                 color: 'danger'
             )
         }
+    }
+
     }
 }
