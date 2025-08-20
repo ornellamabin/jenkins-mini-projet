@@ -6,10 +6,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class HelloControllerTest {
 
     @Test
-    void testAddition() {
-        int a = 2;
-        int b = 3;
-        int result = a + b;
-        assertThat(result).isEqualTo(5);
+    void testSayHello() {
+        HelloController controller = new HelloController();
+        String response = controller.sayHello();
+        assertThat(response).isEqualTo("Hello Jenkins CI/CD!");
     }
 }
