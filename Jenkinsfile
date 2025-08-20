@@ -6,9 +6,6 @@ pipeline {
     
     environment {
         SONAR_TOKEN = credentials('sonarcloud-token')
-        DOCKER_USERNAME = credentials('dockerhub-username')
-        DOCKER_PASSWORD = credentials('dockerhub-password')
-        DOCKER_IMAGE = 'ornellamabin/springboot-app'
     }
     
     stages {
@@ -74,26 +71,14 @@ pipeline {
             }
         }
         
-        stage('Build et Push Docker') {
+        stage('Docker Info') {
             steps {
                 sh '''
-                    echo "=== CONSTRUCTION DE L'IMAGE DOCKER ==="
-                    cd springbootapp
-                    
-                    # Build de l'image Docker
-                    docker build -t $DOCKER_IMAGE:$BUILD_NUMBER .
-                    docker build -t $DOCKER_IMAGE:latest .
-                    
-                    echo "=== CONNEXION À DOCKERHUB ==="
-                    echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
-                    
-                    echo "=== ENVOI DE L'IMAGE ==="
-                    docker push $DOCKER_IMAGE:$BUILD_NUMBER
-                    docker push $DOCKER_IMAGE:latest
-                    
-                    echo "=== NETTOYAGE LOCAL ==="
-                    docker logout
-                    echo "✅ Image Docker poussée avec succès: $DOCKER_IMAGE:$BUILD_NUMBER"
+                    echo "=== INFORMATION DOCKER ==="
+                    echo "Pour activer Docker, configurez les credentials dans Jenkins:"
+                    echo "1. dockerhub-username (votre username DockerHub)"
+                    echo "2. dockerhub-password (votre token DockerHub)"
+                    docker --version
                 '''
             }
         }
