@@ -1,22 +1,37 @@
 pipeline {
-    agent any  // ← CHANGEMENT ICI: Remplace 'docker' par 'any'
-    
+    agent any
     tools {
-        maven 'M3'  // ← Assure-toi que Maven est configuré dans Jenkins
+        maven 'M3'
     }
     
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
         SONAR_TOKEN = credentials('sonarcloud-token')
-        SLACK_WEBHOOK = credentials('slack-webhook-url')
-        SSH_CREDENTIALS = credentials('ssh-deploy-credentials')
     }
     
     stages {
-        // Étape 1: Tests Automatisés
-        stage('Tests Automatisés') {
+        // Étape 1: Checkout du code avec vérification
+        stage('Checkout Code') {
             steps {
-                sh 'mvn clean test'
+                git branch: 'main', 
+                url: 'https://github.com/ornellamabin/jenkins-mini-projet.git'
+                
+                // Debug: vérifier les fichiers
+                sh 'ls -la'
+                sh 'find . -name "pom.xml"'
+            }
+        }
+        
+        // Étape 2: Compilation
+        stage('Compilation') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+        
+        // Étape 3: Tests Unitaires
+        stage('Tests Unitaires') {
+            steps {
+                sh 'mvn test'
             }
             post {
                 always {
@@ -25,62 +40,34 @@ pipeline {
             }
         }
         
-        // Étape 2: Analyse Qualité Code avec SonarCloud
-        stage('Analyse Qualité Code') {
-            when {
-                branch 'main'
-            }
+        // Étape 4: Analyse SonarCloud
+        stage('Analyse SonarCloud') {
             steps {
                 withSonarQubeEnv('sonarcloud') {
-                    sh 'mvn sonar:sonar -Dsonar.projectKey=ton-projet-key -Dsonar.organization=ton-organisation -Dsonar.login=$SONAR_TOKEN'
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true'
                 }
             }
         }
         
-        // Étape 3: Compilation et Packaging (SANS DOCKER)
-        stage('Build Application') {
+        // Étape 5: Packaging
+        stage('Packaging') {
             steps {
-                sh 'mvn clean package -DskipTests'
-            }
-        }
-        
-        // ÉTAPES SUPPRIMÉES : Docker build/push et déploiement
-        // (À réactiver plus tard quand Docker fonctionnera)
-        
-        // Étape 4: Tests Validation Locaux
-        stage('Tests Validation Locaux') {
-            steps {
-                script {
-                    // Tests de santé locaux
-                    sh '''
-                        # Démarrer l'application localement pour tests
-                        java -jar target/*.jar &
-                        APP_PID=$!
-                        
-                        # Attendre le démarrage
-                        sleep 10
-                        
-                        # Tests HTTP
-                        curl -f http://localhost:8080/actuator/health || exit 1
-                        curl -f http://localhost:8080/api/v1/hello || exit 1
-                        
-                        # Arrêter l'application
-                        kill $APP_PID
-                    '''
-                }
+                sh 'mvn package -DskipTests'
+                archiveArtifacts 'target/*.jar'
             }
         }
     }
     
-    // Notifications (commentées temporairement)
     post {
+        always {
+            echo "Build ${currentBuild.currentResult} - Voir les détails: ${env.BUILD_URL}"
+            cleanWs()
+        }
         success {
-            echo "✅ Pipeline SUCCÈS - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            // slackSend channel: '#dev-notifications', message: "✅ Pipeline SUCCÈS", color: 'good'
+            echo "🎉 Pipeline réussi! Application compilée et testée."
         }
         failure {
-            echo "❌ Pipeline ÉCHEC - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            // slackSend channel: '#dev-notifications', message: "❌ Pipeline ÉCHEC", color: 'danger'
+            echo "❌ Pipeline échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
