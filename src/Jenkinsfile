@@ -1,0 +1,310 @@
+pipeline {
+    agent {
+        docker {
+            image 'maven:3.8.6-jdk-17'
+            args '-v /root/.m2:/root/.m2 --network host'
+        }
+    }
+
+    environment {
+        // Configuration SonarCloud
+        SONAR_SCANNER_HOME = tool 'sonar-scanner'
+        SONAR_TOKEN = credentials('sonarcloud-token')
+        
+        // Configuration Docker
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKER_IMAGE = "votredockerhub/mon-projet-spring"
+        
+        // Configuration Slack
+        SLACK_CHANNEL = '#jenkins-notifications'
+        SLACK_WEBHOOK = credentials('slack-webhook')
+        
+        // Configuration application
+        APP_PORT = '8082'
+        APP_NAME = 'mon-app-spring'
+        
+        // Configuration serveurs
+        STAGING_SERVER = 'user@staging-server'
+        PRODUCTION_SERVER = 'user@production-server'
+    }
+
+    stages {
+        // ÉTAPE 1: CHECKOUT DU CODE
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'echo "Repository: ${GIT_URL}"'
+            }
+        }
+
+        // ÉTAPE 2: TESTS AUTOMATISÉS
+        stage('Tests Automatisés') {
+            steps {
+                sh 'mvn test'
+                junit '**/target/surefire-reports/*.xml'
+                archiveArtifacts artifacts: '**/target/surefire-reports/*.xml', fingerprint: true
+            }
+            
+            post {
+                always {
+                    jacoco(
+                        execPattern: '**/target/jacoco.exec',
+                        classPattern: '**/target/classes',
+                        sourcePattern: '**/src/main/java',
+                        exclusionPattern: '**/src/test/**'
+                    )
+                }
+            }
+        }
+
+        // ÉTAPE 3: VÉRIFICATION QUALITÉ DE CODE
+        stage('Analyse SonarCloud') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    expression { env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'develop' }
+                }
+            }
+            steps {
+                withSonarQubeEnv('SonarCloud') {
+                    sh """
+                    ${SONAR_SCANNER_HOME}/bin/sonar-scanner \
+                      -Dsonar.projectKey=mon-projet-spring \
+                      -Dsonar.organization=votre-organisation \
+                      -Dsonar.host.url=\${SONAR_HOST_URL} \
+                      -Dsonar.login=\${SONAR_AUTH_TOKEN} \
+                      -Dsonar.java.binaries=target/classes \
+                      -Dsonar.sources=src/main/java \
+                      -Dsonar.tests=src/test/java \
+                      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+                    """
+                }
+            }
+        }
+
+        // ÉTAPE 4: COMPILATION ET PACKAGING
+        stage('Build et Packaging') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                sh 'ls -la target/'
+            }
+        }
+
+        // ÉTAPE 5: CONSTRUCTION IMAGE DOCKER
+        stage('Build Image Docker') {
+            steps {
+                script {
+                    def tag = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                    def fullImageName = "${DOCKER_IMAGE}:${tag}"
+                    
+                    // Build de l'image
+                    docker.build(fullImageName)
+                    
+                    // Sauvegarde du nom d'image pour les étapes suivantes
+                    env.DOCKER_IMAGE_FULL = fullImageName
+                }
+            }
+        }
+
+        // ÉTAPE 6: PUSH DOCKER HUB
+        stage('Push Docker Hub') {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-creds') {
+                        docker.image(env.DOCKER_IMAGE_FULL).push()
+                        
+                        // Tag supplémentaire pour main (latest)
+                        if (env.BRANCH_NAME == 'main') {
+                            docker.image(env.DOCKER_IMAGE_FULL).push('latest')
+                        }
+                    }
+                }
+            }
+        }
+
+        // ÉTAPE 7: DÉPLOIEMENT STAGING (uniquement sur main)
+        stage('Déploiement Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    def deployCmd = """
+                    docker pull ${env.DOCKER_IMAGE_FULL} && \
+                    docker stop ${APP_NAME}-staging || true && \
+                    docker rm ${APP_NAME}-staging || true && \
+                    docker run -d \
+                      -p ${APP_PORT}:${APP_PORT} \
+                      --name ${APP_NAME}-staging \
+                      --restart unless-stopped \
+                      ${env.DOCKER_IMAGE_FULL}
+                    """
+                    
+                    sshagent(['staging-ssh']) {
+                        sh "ssh -o StrictHostKeyChecking=no ${STAGING_SERVER} '${deployCmd}'"
+                    }
+                    
+                    echo "Application déployée sur staging: http://${STAGING_SERVER}:${APP_PORT}"
+                }
+            }
+        }
+
+        // ÉTAPE 8: TESTS DE VALIDATION STAGING
+        stage('Tests Validation Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    // Attente du démarrage
+                    sleep(time: 30, unit: 'SECONDS')
+                    
+                    // Tests de santé
+                    def healthCheck = """
+                    curl -s -o /dev/null -w '%{http_code}' \
+                    http://${STAGING_SERVER}:${APP_PORT}/actuator/health \
+                    || echo "500"
+                    """
+                    
+                    sshagent(['staging-ssh']) {
+                        def status = sh(
+                            script: "ssh ${STAGING_SERVER} '${healthCheck}'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (status != "200") {
+                            error "Échec du health check staging: HTTP ${status}"
+                        }
+                        
+                        echo "Health check staging réussi: HTTP ${status}"
+                    }
+                }
+            }
+        }
+
+        // ÉTAPE 9: DÉPLOIEMENT PRODUCTION (manuel pour sécurité)
+        stage('Approbation Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    input(
+                        message: 'Déployer en production?', 
+                        ok: 'Déployer',
+                        submitter: 'admin'
+                    )
+                }
+            }
+        }
+
+        stage('Déploiement Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    def deployCmd = """
+                    docker pull ${env.DOCKER_IMAGE_FULL} && \
+                    docker stop ${APP_NAME}-prod || true && \
+                    docker rm ${APP_NAME}-prod || true && \
+                    docker run -d \
+                      -p ${APP_PORT}:${APP_PORT} \
+                      --name ${APP_NAME}-prod \
+                      --restart unless-stopped \
+                      ${env.DOCKER_IMAGE_FULL}
+                    """
+                    
+                    sshagent(['production-ssh']) {
+                        sh "ssh -o StrictHostKeyChecking=no ${PRODUCTION_SERVER} '${deployCmd}'"
+                    }
+                    
+                    echo "Application déployée en production: http://${PRODUCTION_SERVER}:${APP_PORT}"
+                }
+            }
+        }
+
+        // ÉTAPE 10: TESTS DE VALIDATION PRODUCTION
+        stage('Tests Validation Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    sleep(time: 30, unit: 'SECONDS')
+                    
+                    def healthCheck = """
+                    curl -s -o /dev/null -w '%{http_code}' \
+                    http://${PRODUCTION_SERVER}:${APP_PORT}/actuator/health \
+                    || echo "500"
+                    """
+                    
+                    sshagent(['production-ssh']) {
+                        def status = sh(
+                            script: "ssh ${PRODUCTION_SERVER} '${healthCheck}'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (status != "200") {
+                            error "Échec du health check production: HTTP ${status}"
+                        }
+                        
+                        echo "Health check production réussi: HTTP ${status}"
+                    }
+                }
+            }
+        }
+    }
+
+    // POST-BUILD: NOTIFICATIONS ET NETTOYAGE
+    post {
+        always {
+            script {
+                // Notification Slack
+                def color = currentBuild.currentResult == 'SUCCESS' ? 'good' : 
+                           currentBuild.currentResult == 'UNSTABLE' ? 'warning' : 'danger'
+                
+                def message = """
+                *Build ${currentBuild.currentResult}* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
+                *Branche*: ${env.BRANCH_NAME}
+                *Détails*: ${env.BUILD_URL}
+                *Durée*: ${currentBuild.durationString.replace(' and counting', '')}
+                """
+                
+                slackSend(
+                    channel: SLACK_CHANNEL,
+                    color: color,
+                    message: message,
+                    failOnError: false
+                )
+            }
+            
+            // Nettoyage des workspaces
+            cleanWs()
+        }
+        
+        success {
+            echo "Pipeline terminée avec succès! 🎉"
+            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+        }
+        
+        failure {
+            echo "Pipeline échouée! ❌"
+            // Alertes supplémentaires en cas d'échec
+        }
+        
+        unstable {
+            echo "Pipeline instable! ⚠️"
+        }
+    }
+
+    // OPTIONS GLOBALES
+    options {
+        timeout(time: 2, unit: 'HOURS')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+        retry(2)
+    }
+}
