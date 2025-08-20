@@ -1,310 +1,120 @@
 pipeline {
+    // Exécute toutes les étapes dans un conteneur Docker avec Maven
     agent {
         docker {
-            image 'maven:3.8.6-jdk-17'
-            args '-v /root/.m2:/root/.m2 --network host'
+            image 'maven:3.8.6-openjdk-17'
+            args '-v /root/.m2:/root/.m2' // Cache Maven pour accélérer les builds
         }
     }
-
+    
+    // Définition des variables d'environnement (secrets)
     environment {
-        // Configuration SonarCloud
-        SONAR_SCANNER_HOME = tool 'sonar-scanner'
-        SONAR_TOKEN = credentials('sonarcloud-token')
-        
-        // Configuration Docker
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        DOCKER_IMAGE = "votredockerhub/mon-projet-spring"
-        
-        // Configuration Slack
-        SLACK_CHANNEL = '#jenkins-notifications'
-        SLACK_WEBHOOK = credentials('slack-webhook')
-        
-        // Configuration application
-        APP_PORT = '8082'
-        APP_NAME = 'mon-app-spring'
-        
-        // Configuration serveurs
-        STAGING_SERVER = 'user@staging-server'
-        PRODUCTION_SERVER = 'user@production-server'
+        DOCKERHUB_CREDS = credentials('dockerhub-creds') // Identifiants DockerHub
+        SONAR_TOKEN = credentials('sonarcloud-token')     // Token SonarCloud
+        SLACK_WEBHOOK = credentials('slack-token')        // Webhook Slack
     }
-
+    
     stages {
-        // ÉTAPE 1: CHECKOUT DU CODE
+        // Étape 1: Récupération du code source
         stage('Checkout') {
             steps {
-                checkout scm
-                sh 'echo "Repository: ${GIT_URL}"'
+                git branch: 'main', url: 'https://github.com/tonuser/ton-repo.git' // REMPLACE par ton URL GitHub
             }
         }
-
-        // ÉTAPE 2: TESTS AUTOMATISÉS
-        stage('Tests Automatisés') {
+        
+        // Étape 2: Compilation et tests unitaires
+        stage('Build & Tests Unitaires') {
             steps {
-                sh 'mvn test'
-                junit '**/target/surefire-reports/*.xml'
-                archiveArtifacts artifacts: '**/target/surefire-reports/*.xml', fingerprint: true
+                sh 'mvn clean compile test'
             }
-            
             post {
                 always {
-                    jacoco(
-                        execPattern: '**/target/jacoco.exec',
-                        classPattern: '**/target/classes',
-                        sourcePattern: '**/src/main/java',
-                        exclusionPattern: '**/src/test/**'
-                    )
+                    junit 'target/surefire-reports/*.xml' // Archive les résultats des tests
                 }
             }
         }
-
-        // ÉTAPE 3: VÉRIFICATION QUALITÉ DE CODE
-        stage('Analyse SonarCloud') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'develop'
-                    expression { env.CHANGE_TARGET == 'main' || env.CHANGE_TARGET == 'develop' }
-                }
-            }
+        
+        // Étape 3: Analyse de la qualité du code avec SonarCloud
+        stage('Analyse Qualité avec SonarCloud') {
             steps {
-                withSonarQubeEnv('SonarCloud') {
-                    sh """
-                    ${SONAR_SCANNER_HOME}/bin/sonar-scanner \
-                      -Dsonar.projectKey=mon-projet-spring \
-                      -Dsonar.organization=votre-organisation \
-                      -Dsonar.host.url=\${SONAR_HOST_URL} \
-                      -Dsonar.login=\${SONAR_AUTH_TOKEN} \
-                      -Dsonar.java.binaries=target/classes \
-                      -Dsonar.sources=src/main/java \
-                      -Dsonar.tests=src/test/java \
-                      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-                    """
+                withSonarQubeEnv('sonarcloud') { // 'sonarcloud' doit être configuré dans Jenkins
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=ton-project-key -Dsonar.login=$SONAR_TOKEN' // REMPLACE ton-project-key
                 }
             }
         }
-
-        // ÉTAPE 4: COMPILATION ET PACKAGING
-        stage('Build et Packaging') {
-            steps {
-                sh 'mvn clean package -DskipTests'
-                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                sh 'ls -la target/'
-            }
-        }
-
-        // ÉTAPE 5: CONSTRUCTION IMAGE DOCKER
-        stage('Build Image Docker') {
+        
+        // Étape 4: Construction de l'image Docker
+        stage('Build de l\'image Docker') {
             steps {
                 script {
-                    def tag = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-                    def fullImageName = "${DOCKER_IMAGE}:${tag}"
-                    
-                    // Build de l'image
-                    docker.build(fullImageName)
-                    
-                    // Sauvegarde du nom d'image pour les étapes suivantes
-                    env.DOCKER_IMAGE_FULL = fullImageName
+                    // ICI - Ton nom d'utilisateur DockerHub est utilisé
+                    def imageName = "gseha/my-spring-app:${env.BRANCH_NAME == 'main' ? 'latest' : env.BRANCH_NAME}"
+                    docker.build(imageName)
                 }
             }
         }
-
-        // ÉTAPE 6: PUSH DOCKER HUB
-        stage('Push Docker Hub') {
+        
+        // Étape 5: Envoi de l'image sur DockerHub
+        stage('Push de l\'image Docker') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-creds') {
-                        docker.image(env.DOCKER_IMAGE_FULL).push()
-                        
-                        // Tag supplémentaire pour main (latest)
-                        if (env.BRANCH_NAME == 'main') {
-                            docker.image(env.DOCKER_IMAGE_FULL).push('latest')
-                        }
+                    // ICI - Ton nom d'utilisateur DockerHub est utilisé
+                    def imageName = "gseha/my-spring-app:${env.BRANCH_NAME == 'main' ? 'latest' : env.BRANCH_NAME}"
+                    docker.withRegistry('', 'dockerhub-creds') {
+                        docker.image(imageName).push()
                     }
                 }
             }
         }
-
-        // ÉTAPE 7: DÉPLOIEMENT STAGING (uniquement sur main)
-        stage('Déploiement Staging') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    def deployCmd = """
-                    docker pull ${env.DOCKER_IMAGE_FULL} && \
-                    docker stop ${APP_NAME}-staging || true && \
-                    docker rm ${APP_NAME}-staging || true && \
-                    docker run -d \
-                      -p ${APP_PORT}:${APP_PORT} \
-                      --name ${APP_NAME}-staging \
-                      --restart unless-stopped \
-                      ${env.DOCKER_IMAGE_FULL}
-                    """
-                    
-                    sshagent(['staging-ssh']) {
-                        sh "ssh -o StrictHostKeyChecking=no ${STAGING_SERVER} '${deployCmd}'"
-                    }
-                    
-                    echo "Application déployée sur staging: http://${STAGING_SERVER}:${APP_PORT}"
-                }
-            }
-        }
-
-        // ÉTAPE 8: TESTS DE VALIDATION STAGING
-        stage('Tests Validation Staging') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    // Attente du démarrage
-                    sleep(time: 30, unit: 'SECONDS')
-                    
-                    // Tests de santé
-                    def healthCheck = """
-                    curl -s -o /dev/null -w '%{http_code}' \
-                    http://${STAGING_SERVER}:${APP_PORT}/actuator/health \
-                    || echo "500"
-                    """
-                    
-                    sshagent(['staging-ssh']) {
-                        def status = sh(
-                            script: "ssh ${STAGING_SERVER} '${healthCheck}'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (status != "200") {
-                            error "Échec du health check staging: HTTP ${status}"
-                        }
-                        
-                        echo "Health check staging réussi: HTTP ${status}"
-                    }
-                }
-            }
-        }
-
-        // ÉTAPE 9: DÉPLOIEMENT PRODUCTION (manuel pour sécurité)
-        stage('Approbation Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    input(
-                        message: 'Déployer en production?', 
-                        ok: 'Déployer',
-                        submitter: 'admin'
-                    )
-                }
-            }
-        }
-
+        
+        // Étape 6: Déploiement en production (UNIQUEMENT sur la branche main)
         stage('Déploiement Production') {
             when {
-                branch 'main'
+                branch 'main' // Cette étape ne s'exécute que sur la branche principale
             }
             steps {
                 script {
-                    def deployCmd = """
-                    docker pull ${env.DOCKER_IMAGE_FULL} && \
-                    docker stop ${APP_NAME}-prod || true && \
-                    docker rm ${APP_NAME}-prod || true && \
-                    docker run -d \
-                      -p ${APP_PORT}:${APP_PORT} \
-                      --name ${APP_NAME}-prod \
-                      --restart unless-stopped \
-                      ${env.DOCKER_IMAGE_FULL}
-                    """
-                    
-                    sshagent(['production-ssh']) {
-                        sh "ssh -o StrictHostKeyChecking=no ${PRODUCTION_SERVER} '${deployCmd}'"
+                    // Connexion SSH au serveur et exécution du script de déploiement
+                    sshagent(['production-server-ssh']) {
+                        sh "ssh -o StrictHostKeyChecking=no user@ton-serveur-production.com 'cd /opt/my-spring-app && ./deploy.sh'"
                     }
-                    
-                    echo "Application déployée en production: http://${PRODUCTION_SERVER}:${APP_PORT}"
                 }
             }
         }
-
-        // ÉTAPE 10: TESTS DE VALIDATION PRODUCTION
-        stage('Tests Validation Production') {
+        
+        // Étape 7: Vérification que l'application fonctionne
+        stage('Test de Validation') {
             when {
                 branch 'main'
             }
             steps {
                 script {
-                    sleep(time: 30, unit: 'SECONDS')
-                    
-                    def healthCheck = """
-                    curl -s -o /dev/null -w '%{http_code}' \
-                    http://${PRODUCTION_SERVER}:${APP_PORT}/actuator/health \
-                    || echo "500"
-                    """
-                    
-                    sshagent(['production-ssh']) {
-                        def status = sh(
-                            script: "ssh ${PRODUCTION_SERVER} '${healthCheck}'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (status != "200") {
-                            error "Échec du health check production: HTTP ${status}"
-                        }
-                        
-                        echo "Health check production réussi: HTTP ${status}"
+                    // Teste que l'application répond correctement
+                    retry(3) { // Réessaye 3 fois si besoin
+                        sleep 10 // Attend 10 secondes que l'application démarre
+                        sh 'curl -f http://ton-serveur-production.com:8080/actuator/health || exit 1'
                     }
                 }
             }
         }
     }
-
-    // POST-BUILD: NOTIFICATIONS ET NETTOYAGE
+    
+    // Actions finales après l'exécution de la pipeline
     post {
         always {
-            script {
-                // Notification Slack
-                def color = currentBuild.currentResult == 'SUCCESS' ? 'good' : 
-                           currentBuild.currentResult == 'UNSTABLE' ? 'warning' : 'danger'
-                
-                def message = """
-                *Build ${currentBuild.currentResult}* - ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                *Branche*: ${env.BRANCH_NAME}
-                *Détails*: ${env.BUILD_URL}
-                *Durée*: ${currentBuild.durationString.replace(' and counting', '')}
-                """
-                
-                slackSend(
-                    channel: SLACK_CHANNEL,
-                    color: color,
-                    message: message,
-                    failOnError: false
-                )
-            }
-            
-            // Nettoyage des workspaces
-            cleanWs()
+            // Notification Slack dans tous les cas
+            slackSend(
+                channel: '#ton-channel', // REMPLACE par ton canal Slack
+                message: "Build ${currentBuild.result ?: 'SUCCESS'} - Job ${env.JOB_NAME} [${env.BUILD_NUMBER}] (<${env.BUILD_URL}|Open>)"
+            )
         }
-        
-        success {
-            echo "Pipeline terminée avec succès! 🎉"
-            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-        }
-        
         failure {
-            echo "Pipeline échouée! ❌"
-            // Alertes supplémentaires en cas d'échec
+            // Notification spéciale en cas d'échec
+            slackSend(
+                channel: '#ton-channel', // REMPLACE par ton canal Slack
+                message: "ATTENTION : Échec du build ${env.JOB_NAME} [${env.BUILD_NUMBER}] ! (<${env.BUILD_URL}|Voir les logs>)",
+                color: 'danger'
+            )
         }
-        
-        unstable {
-            echo "Pipeline instable! ⚠️"
-        }
-    }
-
-    // OPTIONS GLOBALES
-    options {
-        timeout(time: 2, unit: 'HOURS')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-        retry(2)
     }
 }
