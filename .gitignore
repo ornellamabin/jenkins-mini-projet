@@ -1,0 +1,37 @@
+# Créez le fichier .gitignore à la racine
+@'
+# Fichiers compilés Java
+*.jar
+*.war
+*.ear
+*.class
+
+# Dossiers de build
+target/
+bin/
+build/
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# Système
+.DS_Store
+Thumbs.db
+'@ | Out-File -FilePath .gitignore -Encoding UTF8
+
+# Vérifiez le contenu
+Get-Content .gitignore
