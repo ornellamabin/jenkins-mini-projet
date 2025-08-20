@@ -9,40 +9,52 @@ pipeline {
     }
     
     stages {
-        // Étape 1: Checkout du code
-        stage('Checkout Code') {
+        // Étape 1: Checkout et vérification
+        stage('Checkout et Vérification') {
             steps {
                 git branch: 'main', 
                 url: 'https://github.com/ornellamabin/jenkins-mini-projet.git'
                 
-                // DEBUG: Vérifier la structure
+                // DEBUG COMPLET
                 sh '''
-                    echo "=== STRUCTURE DES FICHIERS ==="
+                    echo "=== CONTENU DU WORKSPACE ==="
                     pwd
                     ls -la
-                    echo "=== SOUS-DOSSIERS ==="
-                    ls -la */
-                    echo "=== RECHERCHE POM.XML ==="
+                    echo "=== STRUCTURE COMPLÈTE ==="
                     find . -name "pom.xml" -type f
+                    echo "=== SOUS-DOSSIERS EXISTANTS ==="
+                    ls -la */
                 '''
             }
         }
         
-        // Étape 2: Compilation (DANS LE BON DOSSIER)
+        // Étape 2: Compilation DANS springbootapp
         stage('Compilation') {
             steps {
-                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
-                    sh 'mvn clean compile'
-                }
+                sh '''
+                    echo "=== TENTATIVE DE COMPILATION ==="
+                    if [ -d "springbootapp" ] && [ -f "springbootapp/pom.xml" ]; then
+                        echo "✅ springbootapp/pom.xml trouvé!"
+                        cd springbootapp
+                        mvn clean compile
+                    else
+                        echo "❌ ERREUR: springbootapp/pom.xml introuvable!"
+                        echo "Structure actuelle:"
+                        ls -la
+                        find . -name "*.xml"
+                        exit 1
+                    fi
+                '''
             }
         }
         
-        // Étape 3: Tests Unitaires (DANS LE BON DOSSIER)
+        // Étape 3: Tests Unitaires
         stage('Tests Unitaires') {
             steps {
-                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
-                    sh 'mvn test'
-                }
+                sh '''
+                    cd springbootapp
+                    mvn test
+                '''
             }
             post {
                 always {
@@ -51,24 +63,24 @@ pipeline {
             }
         }
         
-        // Étape 4: Analyse SonarCloud (DANS LE BON DOSSIER)
+        // Étape 4: Analyse SonarCloud
         stage('Analyse SonarCloud') {
             steps {
-                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
-                    withSonarQubeEnv('sonarcloud') {
-                        sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true'
-                    }
-                }
+                sh '''
+                    cd springbootapp
+                    mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=ornellamabin -Dsonar.login=$SONAR_TOKEN -Dspring-boot.repackage.skip=true
+                '''
             }
         }
         
-        // Étape 5: Packaging (DANS LE BON DOSSIER)
+        // Étape 5: Packaging
         stage('Packaging') {
             steps {
-                dir('springbootapp') {  // ← ESSENTIEL: changer de répertoire
-                    sh 'mvn package -DskipTests'
-                    archiveArtifacts 'springbootapp/target/*.jar'
-                }
+                sh '''
+                    cd springbootapp
+                    mvn package -DskipTests
+                '''
+                archiveArtifacts 'springbootapp/target/*.jar'
             }
         }
     }
