@@ -1,9 +1,8 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.9.9-eclipse-temurin-17'
-            args '-v $HOME/.m2:/root/.m2 -v /var/run/docker.sock:/var/run/docker.sock'
-        }
+    agent any  // ← CHANGEMENT ICI: Remplace 'docker' par 'any'
+    
+    tools {
+        maven 'M3'  // ← Assure-toi que Maven est configuré dans Jenkins
     }
     
     environment {
@@ -33,148 +32,55 @@ pipeline {
             }
             steps {
                 withSonarQubeEnv('sonarcloud') {
-                    sh 'mvn sonar:sonar -Dsonar.projectKey=ton-projet-key -Dsonar.organization=ton-organisation'
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=ton-projet-key -Dsonar.organization=ton-organisation -Dsonar.login=$SONAR_TOKEN'
                 }
             }
         }
         
-        // Étape 3: Compilation et Packaging Docker
-        stage('Build et Packaging Docker') {
+        // Étape 3: Compilation et Packaging (SANS DOCKER)
+        stage('Build Application') {
             steps {
-                script {
-                    // Build de l'application
-                    sh 'mvn clean package -DskipTests'
-                    
-                    // Build de l'image Docker
-                    docker.build("votre-dockerhub-username/springboot-app:${env.BRANCH_NAME}-${env.BUILD_NUMBER}")
-                }
+                sh 'mvn clean package -DskipTests'
             }
         }
         
-        // Étape 4: Push vers DockerHub
-        stage('Push vers DockerHub') {
-            steps {
-                script {
-                    docker.withRegistry('https://registry.hub.docker.com', 'dockerhub-credentials') {
-                        docker.image("votre-dockerhub-username/springboot-app:${env.BRANCH_NAME}-${env.BUILD_NUMBER}").push()
-                    }
-                }
-            }
-        }
+        // ÉTAPES SUPPRIMÉES : Docker build/push et déploiement
+        // (À réactiver plus tard quand Docker fonctionnera)
         
-        // Étape 5: Déploiement Staging (uniquement sur main)
-        stage('Déploiement Staging') {
-            when {
-                branch 'main'
-            }
+        // Étape 4: Tests Validation Locaux
+        stage('Tests Validation Locaux') {
             steps {
                 script {
-                    def remote = [:]
-                    remote.name = 'staging-server'
-                    remote.host = 'votre-server-staging.com'
-                    remote.user = 'deploy-user'
-                    remote.identityFile = '/path/to/ssh/key'
-                    
-                    sshCommand remote: remote, command: """
-                        docker pull votre-dockerhub-username/springboot-app:main-${env.BUILD_NUMBER}
-                        docker stop springboot-app-staging || true
-                        docker rm springboot-app-staging || true
-                        docker run -d -p 8080:8080 --name springboot-app-staging \
-                            votre-dockerhub-username/springboot-app:main-${env.BUILD_NUMBER}
-                    """
-                }
-            }
-        }
-        
-        // Étape 6: Tests Validation Staging
-        stage('Tests Validation Staging') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    // Attendre que l'application soit ready
-                    sleep time: 30, unit: 'SECONDS'
-                    
-                    // Tests de santé
+                    // Tests de santé locaux
                     sh '''
-                        curl -f http://votre-server-staging.com:8080/api/v1/health || exit 1
-                        curl -f http://votre-server-staging.com:8080/api/v1/hello || exit 1
-                    '''
-                }
-            }
-        }
-        
-        // Étape 7: Déploiement Production (manuel pour approbation)
-        stage('Approbation Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    input message: 'Déployer en production?', ok: 'Déployer'
-                }
-            }
-        }
-        
-        stage('Déploiement Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    def remote = [:]
-                    remote.name = 'production-server'
-                    remote.host = 'votre-server-production.com'
-                    remote.user = 'deploy-user'
-                    remote.identityFile = '/path/to/ssh/key'
-                    
-                    sshCommand remote: remote, command: """
-                        docker pull votre-dockerhub-username/springboot-app:main-${env.BUILD_NUMBER}
-                        docker stop springboot-app-production || true
-                        docker rm springboot-app-production || true
-                        docker run -d -p 8080:8080 --name springboot-app-production \
-                            -e SPRING_PROFILES_ACTIVE=production \
-                            votre-dockerhub-username/springboot-app:main-${env.BUILD_NUMBER}
-                    """
-                }
-            }
-        }
-        
-        // Étape 8: Tests Validation Production
-        stage('Tests Validation Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    sleep time: 30, unit: 'SECONDS'
-                    
-                    sh '''
-                        curl -f https://votre-app-production.com/api/v1/health || exit 1
-                        curl -f https://votre-app-production.com/api/v1/hello || exit 1
+                        # Démarrer l'application localement pour tests
+                        java -jar target/*.jar &
+                        APP_PID=$!
+                        
+                        # Attendre le démarrage
+                        sleep 10
+                        
+                        # Tests HTTP
+                        curl -f http://localhost:8080/actuator/health || exit 1
+                        curl -f http://localhost:8080/api/v1/hello || exit 1
+                        
+                        # Arrêter l'application
+                        kill $APP_PID
                     '''
                 }
             }
         }
     }
     
-    // Notifications Slack
+    // Notifications (commentées temporairement)
     post {
         success {
-            slackSend channel: '#dev-notifications',
-                     message: "✅ Pipeline SUCCÈS - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${currentBuild.currentResult})",
-                     color: 'good'
+            echo "✅ Pipeline SUCCÈS - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            // slackSend channel: '#dev-notifications', message: "✅ Pipeline SUCCÈS", color: 'good'
         }
         failure {
-            slackSend channel: '#dev-notifications',
-                     message: "❌ Pipeline ÉCHEC - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${currentBuild.currentResult})",
-                     color: 'danger'
-        }
-        unstable {
-            slackSend channel: '#dev-notifications',
-                     message: "⚠️ Pipeline INSTABLE - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${currentBuild.currentResult})",
-                     color: 'warning'
+            echo "❌ Pipeline ÉCHEC - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            // slackSend channel: '#dev-notifications', message: "❌ Pipeline ÉCHEC", color: 'danger'
         }
     }
 }
