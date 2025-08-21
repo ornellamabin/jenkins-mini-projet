@@ -1,88 +1,83 @@
 pipeline {
     agent any
-    tools {
-        maven 'M3'
-        jdk 'jdk17'
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
     }
-    environment {
-        SONAR_TOKEN = credentials('sonarcloud-token')
-        GITHUB_CREDS = credentials('github-credentials')
-    }
+    
     stages {
-        // Étape 1: Clone du code
-        stage('Clone Git Repository') {
+        stage('Checkout') {
             steps {
-                git(
-                    branch: 'main',
-                    url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
-                    credentialsId: 'github-credentials'
-                )
-                echo '✅ Repository cloné avec succès'
-            }
-        }
-        
-        // Étape 2: Build et compilation
-        stage('Build Application') {
-            steps {
-                sh '''
-                    cd springbootapp
-                    mvn clean compile -q
-                '''
-                echo '✅ Application compilée avec succès'
-            }
-        }
-        
-        // Étape 3: Tests unitaires
-        stage('Run Unit Tests') {
-            steps {
-                sh '''
-                    cd springbootapp
-                    mvn test -q
-                '''
-                echo '✅ Tests unitaires exécutés'
-            }
-            post {
-                always {
-                    junit 'springbootapp/target/surefire-reports/*.xml'
-                    archiveArtifacts 'springbootapp/target/*.jar'
+                script {
+                    echo '🚀 Clonage du dépôt avec shallow clone...'
+                    git branch: 'main',
+                         url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
+                         credentialsId: 'github-credentials', // À adapter avec vos credentials
+                         extensions: [
+                             [$class: 'CloneOption', 
+                              depth: 1, 
+                              shallow: true,
+                              noTags: false,
+                              timeout: 60],
+                             [$class: 'CheckoutOption', timeout: 30]
+                         ]
                 }
             }
         }
         
-        // Étape 4: Analyse SonarCloud
-        stage('SonarCloud Analysis') {
-            when {
-                branch 'main'
-            }
+        stage('Build') {
             steps {
-                withSonarQubeEnv('SonarCloud') {
-                    sh '''
-                        cd springbootapp
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=springboot-app \
-                          -Dsonar.organization=ornellamabin \
-                          -Dsonar.login=$SONAR_TOKEN \
-                          -Dsonar.host.url=https://sonarcloud.io
-                    '''
+                script {
+                    echo '🔨 Construction du projet...'
+                    // Ajoutez vos commandes de build ici
+                    bat 'mvn clean compile'  // Pour Windows
+                    // ou sh './mvnw clean compile'  // Pour Linux
                 }
-                echo '✅ Analyse SonarCloud effectuée'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                script {
+                    echo '🧪 Exécution des tests...'
+                    bat 'mvn test'  // Pour Windows
+                    // ou sh './mvnw test'  // Pour Linux
+                }
+            }
+        }
+        
+        stage('Package') {
+            steps {
+                script {
+                    echo '📦 Packaging de l application...'
+                    bat 'mvn package -DskipTests'  // Pour Windows
+                    // ou sh './mvnw package -DskipTests'  // Pour Linux
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo '🚀 Déploiement...'
+                    // Ajoutez vos étapes de déploiement ici
+                    echo 'Déploiement réussi!'
+                }
             }
         }
     }
+    
     post {
+        always {
+            echo '🧹 Nettoyage...'
+            cleanWs()  // Nettoie le workspace
+        }
         success {
-            echo '🎉 Pipeline exécutée avec succès!'
-            slackSend(
-                channel: '#jenkins',
-                message: "SUCCESS: Build ${env.BUILD_NUMBER} - ${env.JOB_NAME}"
-            )
+            echo '✅ Pipeline exécuté avec succès!'
         }
         failure {
-            echo '❌ Pipeline a échoué!'
-            slackSend(
-                channel: '#jenkins', 
-                message: "FAILURE: Build ${env.BUILD_NUMBER} - ${env.JOB_NAME}"
-            )
+            echo '❌ Échec du pipeline!'
+            // Vous pouvez ajouter des notifications ici
         }
     }
 }
