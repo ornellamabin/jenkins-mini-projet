@@ -1,5 +1,10 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.8.4-openjdk-11'  // Image Maven avec JDK 11
+            args '-v /root/.m2:/root/.m2'   // Cache Maven pour accélérer les builds
+        }
+    }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
@@ -12,7 +17,7 @@ pipeline {
                     echo '🚀 Clonage du dépôt avec shallow clone...'
                     git branch: 'main',
                          url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
-                         credentialsId: 'github-credentials', // À adapter avec vos credentials
+                         credentialsId: 'github-credentials',
                          extensions: [
                              [$class: 'CloneOption', 
                               depth: 1, 
@@ -29,9 +34,7 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
-                    // Ajoutez vos commandes de build ici
-                    sh 'mvn clean compile'  // Pour Windows
-                    // ou sh './mvnw clean compile'  // Pour Linux
+                    sh 'mvn clean compile'
                 }
             }
         }
@@ -40,8 +43,7 @@ pipeline {
             steps {
                 script {
                     echo '🧪 Exécution des tests...'
-                    bat 'mvn test'  // Pour Windows
-                    // ou sh './mvnw test'  // Pour Linux
+                    sh 'mvn test'
                 }
             }
         }
@@ -50,8 +52,7 @@ pipeline {
             steps {
                 script {
                     echo '📦 Packaging de l application...'
-                    bat 'mvn package -DskipTests'  // Pour Windows
-                    // ou sh './mvnw package -DskipTests'  // Pour Linux
+                    sh 'mvn package -DskipTests'
                 }
             }
         }
@@ -62,6 +63,9 @@ pipeline {
                     echo '🚀 Déploiement...'
                     // Ajoutez vos étapes de déploiement ici
                     echo 'Déploiement réussi!'
+                    
+                    // Exemple: Copie du JAR
+                    sh 'cp target/*.jar /opt/app/ || echo "Aucun fichier JAR à copier"'
                 }
             }
         }
@@ -70,14 +74,13 @@ pipeline {
     post {
         always {
             echo '🧹 Nettoyage...'
-            cleanWs()  // Nettoie le workspace
+            cleanWs()
         }
         success {
             echo '✅ Pipeline exécuté avec succès!'
         }
         failure {
             echo '❌ Échec du pipeline!'
-            // Vous pouvez ajouter des notifications ici
         }
     }
 }
