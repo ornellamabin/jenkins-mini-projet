@@ -30,7 +30,7 @@ pipeline {
                 script {
                     echo '🔨 Construction du projet...'
                     // Ajoutez vos commandes de build ici
-                    bat 'mvn clean compile'  // Pour Windows
+                    sh 'mvn clean compile'  // Pour Windows
                     // ou sh './mvnw clean compile'  // Pour Linux
                 }
             }
