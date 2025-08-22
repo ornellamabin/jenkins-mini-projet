@@ -6,11 +6,6 @@ pipeline {
         jdk 'jdk17'
     }
     
-    environment {
-        // Variables d'environnement simples
-        SLACK_CHANNEL = '#general'  // Canal par défaut
-    }
-    
     options {
         timeout(time: 30, unit: 'MINUTES')
     }
@@ -22,8 +17,7 @@ pipeline {
                     echo '🚀 Clonage du dépôt...'
                     git branch: "main",
                          url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
-                         credentialsId: 'github-credentials',
-                         extensions: [[$class: 'CloneOption', depth: 1, shallow: true]]
+                         credentialsId: 'github-credentials'
                 }
             }
         }
@@ -32,9 +26,8 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
-                    dir('springbootapp') {
-                        sh 'mvn clean compile'
-                    }
+                    // PLUS BESOIN de dir() car pom.xml est à la racine
+                    sh 'mvn clean compile'
                 }
             }
         }
@@ -43,14 +36,12 @@ pipeline {
             steps {
                 script {
                     echo '🧪 Exécution des tests...'
-                    dir('springbootapp') {
-                        sh 'mvn test'
-                    }
+                    sh 'mvn test'
                 }
             }
             post {
                 always {
-                    junit 'springbootapp/target/surefire-reports/*.xml'
+                    junit 'target/surefire-reports/*.xml'
                 }
             }
         }
@@ -59,9 +50,7 @@ pipeline {
             steps {
                 script {
                     echo '📦 Packaging de l application...'
-                    dir('springbootapp') {
-                        sh 'mvn package -DskipTests'
-                    }
+                    sh 'mvn package -DskipTests'
                 }
             }
         }
@@ -70,10 +59,8 @@ pipeline {
             steps {
                 script {
                     echo '🚀 Déploiement...'
-                    dir('springbootapp') {
-                        echo 'Déploiement réussi!'
-                        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                    }
+                    echo 'Déploiement réussi!'
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
                 }
             }
         }
@@ -85,13 +72,9 @@ pipeline {
         }
         success {
             echo '✅ Pipeline exécuté avec succès!'
-            // Décommentez quand Slack sera configuré :
-            // slackSend(channel: "${env.SLACK_CHANNEL}", message: "✅ SUCCÈS: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
         }
         failure {
             echo '❌ Échec du pipeline!'
-            // Décommentez quand Slack sera configuré :
-            // slackSend(channel: "${env.SLACK_CHANNEL}", message: "❌ ÉCHEC: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
         }
     }
 }
