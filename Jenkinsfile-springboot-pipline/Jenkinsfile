@@ -1,20 +1,24 @@
 pipeline {
-    agent any
-    
-    tools {
-        maven 'M3'
-        jdk 'jdk17'
+    agent {
+        docker {
+            image 'maven:3.8.6-openjdk-17'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
+            reuseNode true
+        }
     }
     
     environment {
-        APP_NAME = "springboot-app"
-        PROJECT_DIR = "springbootapp"
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        SONAR_TOKEN = credentials('sonarcloud-token')
+        SSH_CREDENTIALS = credentials('ssh-deploy-credentials')
+        SLACK_CHANNEL = '#your-slack-channel'
+        DOCKER_IMAGE = 'votre-dockerhub-username/springboot-app'
+        DOCKER_TAG = "${env.BRANCH_NAME == 'main' ? 'latest' : env.BRANCH_NAME}"
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
     }
     
     stages {
@@ -22,74 +26,136 @@ pipeline {
             steps {
                 script {
                     echo '🚀 Clonage du dépôt...'
-                    git branch: 'main',
+                    git branch: "${env.BRANCH_NAME}",
                          url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
                          credentialsId: 'github-credentials',
-                         extensions: [
-                             [$class: 'CloneOption', 
-                              depth: 1, 
-                              shallow: true,
-                              noTags: false,
-                              timeout: 60]
-                         ]
+                         extensions: [[$class: 'CloneOption', depth: 1, shallow: true]]
                 }
             }
         }
         
-        stage('Build') {
+        stage('Tests Automatisés') {
             steps {
                 script {
-                    echo '🔨 Construction du projet...'
-                    dir(PROJECT_DIR) {
-                        sh 'mvn clean compile'
-                    }
-                }
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                script {
-                    echo '🧪 Exécution des tests...'
-                    dir(PROJECT_DIR) {
+                    echo '🧪 Exécution des tests unitaires et d intégration...'
+                    dir('springbootapp') {
                         sh 'mvn test'
                     }
                 }
             }
-            
             post {
                 always {
-                    dir(PROJECT_DIR) {
-                        junit 'target/surefire-reports/*.xml'
-                    }
+                    junit 'springbootapp/target/surefire-reports/*.xml'
                 }
             }
         }
         
-        stage('Package') {
-            steps {
-                script {
-                    echo '📦 Packaging de l application...'
-                    dir(PROJECT_DIR) {
-                        sh 'mvn package -DskipTests'
-                    }
+        stage('Analyse Qualité Code avec SonarCloud') {
+            when {
+                expression { 
+                    env.BRANCH_NAME == 'main' || 
+                    env.BRANCH_NAME == 'develop' || 
+                    env.CHANGE_TARGET == 'main' 
                 }
             }
-        }
-        
-        stage('Deploy') {
             steps {
                 script {
-                    echo '🚀 Déploiement...'
-                    dir(PROJECT_DIR) {
-                        echo 'Déploiement réussi!'
-                        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                        
-                        // Optionnel : Stockage des métadonnées du build
-                        script {
-                            currentBuild.description = "Version: ${APP_NAME} - Build #${BUILD_NUMBER}"
+                    echo '🔍 Analyse statique du code avec SonarCloud...'
+                    dir('springbootapp') {
+                        withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+                            sh """
+                                mvn sonar:sonar \
+                                  -Dsonar.projectKey=votre-project-key \
+                                  -Dsonar.organization=votre-organisation \
+                                  -Dsonar.host.url=https://sonarcloud.io \
+                                  -Dsonar.login=${SONAR_TOKEN}
+                            """
                         }
                     }
+                }
+            }
+        }
+        
+        stage('Compilation et Packaging Docker') {
+            steps {
+                script {
+                    echo '📦 Construction et packaging de l application...'
+                    dir('springbootapp') {
+                        // Build de l'application
+                        sh 'mvn clean package -DskipTests'
+                        
+                        // Construction de l'image Docker
+                        sh """
+                            docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
+                        """
+                        
+                        // Login et push vers DockerHub
+                        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', 
+                                                         usernameVariable: 'DOCKER_USER', 
+                                                         passwordVariable: 'DOCKER_PASS')]) {
+                            sh """
+                                echo \"${DOCKER_PASS}\" | docker login -u \"${DOCKER_USER}\" --password-stdin
+                                docker push ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Déploiement Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '🚀 Déploiement en environnement de staging...'
+                    deployToServer('staging-server-hostname', 'staging')
+                }
+            }
+        }
+        
+        stage('Tests Validation Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '✅ Validation du déploiement staging...'
+                    sh """
+                        curl -f http://staging-server-hostname:8080/health || exit 1
+                        curl -f http://staging-server-hostname:8080/api/hello || exit 1
+                    """
+                    echo '✅ Tests de validation staging réussis!'
+                }
+            }
+        }
+        
+        stage('Déploiement Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '🎯 Déploiement en production...'
+                    input message: 'Déployer en production?', ok: 'Déployer'
+                    deployToServer('production-server-hostname', 'production')
+                }
+            }
+        }
+        
+        stage('Tests Validation Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '✅ Validation du déploiement production...'
+                    sh """
+                        curl -f http://production-server-hostname:8080/health || exit 1
+                        curl -f http://production-server-hostname:8080/api/hello || exit 1
+                    """
+                    echo '✅ Tests de validation production réussis!'
                 }
             }
         }
@@ -97,35 +163,55 @@ pipeline {
     
     post {
         always {
-            echo '🧹 Nettoyage de l espace de travail...'
-            cleanWs()
-            
-            // Rapport de qualité du code (optionnel)
-            dir(PROJECT_DIR) {
-                recordIssues(
-                    tools: [java(), maven()],
-                    enabledForFailure: true
-                )
-            }
+            echo "🧹 Nettoyage de l'espace de travail..."
+            // cleanWs() // Décommentez si nécessaire
         }
         success {
-            echo '✅ Pipeline exécuté avec succès!'
-            emailext (
-                subject: "SUCCÈS: Pipeline ${APP_NAME} - Build #${BUILD_NUMBER}",
-                body: "Le build ${BUILD_NUMBER} a réussi. Consultez: ${BUILD_URL}",
-                to: "votre-email@example.com"
-            )
+            echo "✅ Pipeline exécutée avec succès!"
+            slackSend channel: "${env.SLACK_CHANNEL}", 
+                     color: "good", 
+                     message: "SUCCÈS: Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME}) - ${env.BUILD_URL}"
         }
         failure {
-            echo '❌ Échec du pipeline!'
-            emailext (
-                subject: "ÉCHEC: Pipeline ${APP_NAME} - Build #${BUILD_NUMBER}",
-                body: "Le build ${BUILD_NUMBER} a échoué. Consultez: ${BUILD_URL}",
-                to: "votre-email@example.com"
-            )
+            echo "❌ Échec de la pipeline!"
+            slackSend channel: "${env.SLACK_CHANNEL}", 
+                     color: "danger", 
+                     message: "ÉCHEC: Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME}) - ${env.BUILD_URL}"
         }
         unstable {
-            echo '⚠️  Pipeline instable (tests échoués)!'
+            slackSend channel: "${env.SLACK_CHANNEL}", 
+                     color: "warning", 
+                     message: "INSTABLE: Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME}) - ${env.BUILD_URL}"
         }
     }
+}
+
+// Fonction pour déployer sur un serveur via SSH
+def deployToServer(serverHostname, environment) {
+    withCredentials([sshUserPrivateKey(credentialsId: 'ssh-deploy-credentials', 
+                                     keyFileVariable: 'SSH_KEY', 
+                                     usernameVariable: 'SSH_USER')]) {
+        sh """
+            ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${SSH_USER}@${serverHostname} << 'EOF'
+                # Arrêter le conteneur existant
+                docker stop springboot-app-${environment} || true
+                docker rm springboot-app-${environment} || true
+                
+                # Pull de la nouvelle image
+                echo \"${DOCKER_PASS}\" | docker login -u \"${DOCKER_USER}\" --password-stdin
+                docker pull ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+                
+                # Lancer le nouveau conteneur
+                docker run -d \\
+                  --name springboot-app-${environment} \\
+                  -p 8080:8080 \\
+                  -e SPRING_PROFILES_ACTIVE=${environment} \\
+                  ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+                
+                # Nettoyage des anciennes images
+                docker image prune -f
+            EOF
+        """
+    }
+    echo "✅ Déploiement sur ${serverHostname} (${environment}) réussi!"
 }
