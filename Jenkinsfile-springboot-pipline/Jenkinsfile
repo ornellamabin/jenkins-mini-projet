@@ -1,53 +1,97 @@
 pipeline {
     agent any
     
+    tools {
+        maven 'M3'
+        jdk 'jdk17'
+    }
+    
     environment {
-        // Configuration flexible - utilise le canal par défaut ou un spécifique
-        SLACK_CHANNEL = env.BRANCH_NAME == 'main' ? '#production' : '#development'
+        // Variables d'environnement simples
+        SLACK_CHANNEL = '#general'  // Canal par défaut
+    }
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
     }
     
     stages {
-        // Vos stages ici...
+        stage('Checkout') {
+            steps {
+                script {
+                    echo '🚀 Clonage du dépôt...'
+                    git branch: "main",
+                         url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
+                         credentialsId: 'github-credentials',
+                         extensions: [[$class: 'CloneOption', depth: 1, shallow: true]]
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                script {
+                    echo '🔨 Construction du projet...'
+                    dir('springbootapp') {
+                        sh 'mvn clean compile'
+                    }
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                script {
+                    echo '🧪 Exécution des tests...'
+                    dir('springbootapp') {
+                        sh 'mvn test'
+                    }
+                }
+            }
+            post {
+                always {
+                    junit 'springbootapp/target/surefire-reports/*.xml'
+                }
+            }
+        }
+        
+        stage('Package') {
+            steps {
+                script {
+                    echo '📦 Packaging de l application...'
+                    dir('springbootapp') {
+                        sh 'mvn package -DskipTests'
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo '🚀 Déploiement...'
+                    dir('springbootapp') {
+                        echo 'Déploiement réussi!'
+                        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    }
+                }
+            }
+        }
     }
     
     post {
         always {
-            echo "🧹 Nettoyage..."
+            echo '🧹 Nettoyage de l espace de travail...'
         }
         success {
-            script {
-                slackSend(
-                    channel: "${env.SLACK_CHANNEL}",
-                    color: "good", 
-                    message: """✅ SUCCÈS: ${env.JOB_NAME} #${env.BUILD_NUMBER}
-• Branche: ${env.BRANCH_NAME}
-• Durée: ${currentBuild.durationString}
-• Détails: ${env.BUILD_URL}"""
-                )
-            }
+            echo '✅ Pipeline exécuté avec succès!'
+            // Décommentez quand Slack sera configuré :
+            // slackSend(channel: "${env.SLACK_CHANNEL}", message: "✅ SUCCÈS: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
         }
         failure {
-            script {
-                slackSend(
-                    channel: "${env.SLACK_CHANNEL}", 
-                    color: "danger",
-                    message: """❌ ÉCHEC: ${env.JOB_NAME} #${env.BUILD_NUMBER}
-• Branche: ${env.BRANCH_NAME}
-• Cause: ${currentBuild.currentResult}
-• Détails: ${env.BUILD_URL}"""
-                )
-            }
-        }
-        unstable {
-            script {
-                slackSend(
-                    channel: "${env.SLACK_CHANNEL}",
-                    color: "warning",
-                    message: """⚠️ INSTABLE: ${env.JOB_NAME} #${env.BUILD_NUMBER}
-• Branche: ${env.BRANCH_NAME}
-• Détails: ${env.BUILD_URL}"""
-                )
-            }
+            echo '❌ Échec du pipeline!'
+            // Décommentez quand Slack sera configuré :
+            // slackSend(channel: "${env.SLACK_CHANNEL}", message: "❌ ÉCHEC: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
         }
     }
 }
