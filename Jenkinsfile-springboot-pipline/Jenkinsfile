@@ -3,7 +3,7 @@ pipeline {
     
     tools {
         maven 'M3'  // Configurez Maven dans Jenkins → Outils globaux
-        jdk 'JDK11' // Configurez JDK dans Jenkins → Outils globaux
+        jdk 'jdk17' // Utilisez le nom exact configuré dans Jenkins
     }
     
     options {
