@@ -1,91 +1,148 @@
 pipeline {
     agent any
-    
+
     tools {
         maven 'M3'
         jdk 'jdk17'
     }
-    
+
     options {
         timeout(time: 30, unit: 'MINUTES')
     }
-    
+
+    environment {
+        APP_NAME    = "springboot-app"
+        DOCKER_USER = "ton_dockerhub_user"
+
+        // Credentials Jenkins (à créer)
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        SONAR_TOKEN           = credentials('sonar-token')
+    }
+
     stages {
         stage('Checkout') {
             steps {
-                script {
-                    echo '🚀 Clonage du dépôt...'
-                    git branch: 'main',
-                         url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
-                         credentialsId: 'github-credentials',
-                         extensions: [
-                             [$class: 'CloneOption', 
-                              depth: 1, 
-                              shallow: true,
-                              noTags: false,
-                              timeout: 60]
-                         ]
-                }
+                echo '🚀 Clonage du dépôt...'
+                git branch: "${env.BRANCH_NAME}",
+                     url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
+                     credentialsId: 'github-credentials'
             }
         }
-        
+
         stage('Build') {
             steps {
-                script {
-                    echo '🔨 Construction du projet...'
-                    // CORRECTION : utiliser le bon dossier springbootapp
-                    dir('springbootapp') {
-                        sh 'mvn clean compile'
-                    }
+                echo '🔨 Construction du projet...'
+                dir('springbootapp') {
+                    sh 'mvn clean compile'
                 }
             }
         }
-        
-        stage('Test') {
+
+        stage('Tests') {
             steps {
-                script {
-                    echo '🧪 Exécution des tests...'
-                    dir('springbootapp') {
-                        sh 'mvn test'
-                    }
+                echo '🧪 Exécution des tests...'
+                dir('springbootapp') {
+                    sh 'mvn test'
                 }
             }
         }
-        
+
+        stage('Analyse Qualité (SonarCloud)') {
+            steps {
+                echo '🔍 Analyse SonarCloud...'
+                dir('springbootapp') {
+                    sh """
+                    mvn sonar:sonar \
+                       -Dsonar.projectKey=${APP_NAME} \
+                       -Dsonar.organization=ton_org_sonar \
+                       -Dsonar.host.url=https://sonarcloud.io \
+                       -Dsonar.login=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+
         stage('Package') {
             steps {
-                script {
-                    echo '📦 Packaging de l application...'
-                    dir('springbootapp') {
-                        sh 'mvn package -DskipTests'
-                    }
+                echo '📦 Packaging de l application...'
+                dir('springbootapp') {
+                    sh 'mvn package -DskipTests'
                 }
             }
         }
-        
-        stage('Deploy') {
+
+        stage('Build & Push Docker Image') {
             steps {
-                script {
-                    echo '🚀 Déploiement...'
-                    dir('springbootapp') {
-                        echo 'Déploiement réussi!'
-                        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                    }
+                echo '🐳 Build et Push Docker...'
+                dir('springbootapp') {
+                    sh "docker build -t ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER} ."
+                    sh """
+                    echo ${DOCKERHUB_CREDENTIALS_PSW} | \
+                    docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
+                    docker push ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER}
+                    """
                 }
+            }
+        }
+
+        stage('Deploy Staging') {
+            when { branch 'main' }
+            steps {
+                echo '🚀 Déploiement Staging...'
+                sshagent(['ssh-staging']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no user@staging-server '
+                        docker pull ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER} &&
+                        docker stop ${APP_NAME} || true &&
+                        docker rm ${APP_NAME} || true &&
+                        docker run -d --name ${APP_NAME} -p 8080:8080 ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER}
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            when { branch 'main' }
+            steps {
+                input message: "⚠️ Déployer en Production ?"
+                echo '🚀 Déploiement Production...'
+                sshagent(['ssh-prod']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no user@prod-server '
+                        docker pull ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER} &&
+                        docker stop ${APP_NAME} || true &&
+                        docker rm ${APP_NAME} || true &&
+                        docker run -d --name ${APP_NAME} -p 80:8080 ${DOCKER_USER}/${APP_NAME}:${BUILD_NUMBER}
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Validation Déploiement') {
+            when { branch 'main' }
+            steps {
+                echo '✅ Vérification déploiement...'
+                sh 'curl -f http://prod-server/actuator/health'
             }
         }
     }
-    
+
     post {
         always {
             echo '🧹 Nettoyage...'
             cleanWs()
         }
         success {
-            echo '✅ Pipeline exécuté avec succès!'
+            echo '✅ Pipeline exécutée avec succès!'
+            slackSend(channel: '#ci-cd',
+                      message: "✅ SUCCESS | ${APP_NAME} | Build #${BUILD_NUMBER}")
         }
         failure {
             echo '❌ Échec du pipeline!'
+            slackSend(channel: '#ci-cd',
+                      message: "❌ FAILURE | ${APP_NAME} | Build #${BUILD_NUMBER}")
         }
     }
 }
