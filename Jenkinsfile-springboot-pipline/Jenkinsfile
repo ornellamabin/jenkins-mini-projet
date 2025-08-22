@@ -1,9 +1,9 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.8.4-openjdk-11'  // Image Maven avec JDK 11
-            args '-v /root/.m2:/root/.m2'   // Cache Maven pour accélérer les builds
-        }
+    agent any
+    
+    tools {
+        maven 'M3'  // Configurez Maven dans Jenkins → Outils globaux
+        jdk 'JDK11' // Configurez JDK dans Jenkins → Outils globaux
     }
     
     options {
@@ -14,7 +14,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 script {
-                    echo '🚀 Clonage du dépôt avec shallow clone...'
+                    echo '🚀 Clonage du dépôt...'
                     git branch: 'main',
                          url: 'https://github.com/ornellamabin/jenkins-mini-projet.git',
                          credentialsId: 'github-credentials',
@@ -23,8 +23,7 @@ pipeline {
                               depth: 1, 
                               shallow: true,
                               noTags: false,
-                              timeout: 60],
-                             [$class: 'CheckoutOption', timeout: 30]
+                              timeout: 60]
                          ]
                 }
             }
@@ -34,6 +33,7 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
+                    sh 'mvn --version'  // Test d'abord
                     sh 'mvn clean compile'
                 }
             }
@@ -61,11 +61,8 @@ pipeline {
             steps {
                 script {
                     echo '🚀 Déploiement...'
-                    // Ajoutez vos étapes de déploiement ici
                     echo 'Déploiement réussi!'
-                    
-                    // Exemple: Copie du JAR
-                    sh 'cp target/*.jar /opt/app/ || echo "Aucun fichier JAR à copier"'
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
                 }
             }
         }
