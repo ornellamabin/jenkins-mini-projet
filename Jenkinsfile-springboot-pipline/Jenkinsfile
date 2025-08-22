@@ -2,8 +2,8 @@ pipeline {
     agent any
     
     tools {
-        maven 'M3'  // Configurez Maven dans Jenkins → Outils globaux
-        jdk 'jdk17' // Utilisez le nom exact configuré dans Jenkins
+        maven 'M3'
+        jdk 'jdk17'
     }
     
     options {
@@ -29,12 +29,24 @@ pipeline {
             }
         }
         
+        stage('Explore Directory') {
+            steps {
+                script {
+                    echo '📁 Exploration des dossiers...'
+                    sh 'ls -la'  // Voir la structure
+                    sh 'find . -name "pom.xml" -type f'  // Trouver le POM
+                }
+            }
+        }
+        
         stage('Build') {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
-                    sh 'mvn --version'  // Test d'abord
-                    sh 'mvn clean compile'
+                    // Se déplacer dans le dossier springboot-tapp
+                    dir('springboot-tapp') {
+                        sh 'mvn clean compile'
+                    }
                 }
             }
         }
@@ -43,7 +55,9 @@ pipeline {
             steps {
                 script {
                     echo '🧪 Exécution des tests...'
-                    sh 'mvn test'
+                    dir('springboot-tapp') {
+                        sh 'mvn test'
+                    }
                 }
             }
         }
@@ -52,7 +66,9 @@ pipeline {
             steps {
                 script {
                     echo '📦 Packaging de l application...'
-                    sh 'mvn package -DskipTests'
+                    dir('springboot-tapp') {
+                        sh 'mvn package -DskipTests'
+                    }
                 }
             }
         }
@@ -61,8 +77,10 @@ pipeline {
             steps {
                 script {
                     echo '🚀 Déploiement...'
-                    echo 'Déploiement réussi!'
-                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    dir('springboot-tapp') {
+                        echo 'Déploiement réussi!'
+                        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    }
                 }
             }
         }
