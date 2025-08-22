@@ -1,21 +1,53 @@
 pipeline {
     agent any
     
+    environment {
+        // Configuration flexible - utilise le canal par défaut ou un spécifique
+        SLACK_CHANNEL = env.BRANCH_NAME == 'main' ? '#production' : '#development'
+    }
+    
     stages {
-        stage('Test') {
-            steps {
-                echo "Test de pipeline..."
-            }
-        }
+        // Vos stages ici...
     }
     
     post {
         always {
-            slackSend(
-                webhookUrl: 'https://hooks.slack.com/services/VOTRE/URL/WEBHOOK',
-                channel: '#jenkins',
-                message: "Build ${currentBuild.result?: 'SUCCESS'} - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            )
+            echo "🧹 Nettoyage..."
+        }
+        success {
+            script {
+                slackSend(
+                    channel: "${env.SLACK_CHANNEL}",
+                    color: "good", 
+                    message: """✅ SUCCÈS: ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Branche: ${env.BRANCH_NAME}
+• Durée: ${currentBuild.durationString}
+• Détails: ${env.BUILD_URL}"""
+                )
+            }
+        }
+        failure {
+            script {
+                slackSend(
+                    channel: "${env.SLACK_CHANNEL}", 
+                    color: "danger",
+                    message: """❌ ÉCHEC: ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Branche: ${env.BRANCH_NAME}
+• Cause: ${currentBuild.currentResult}
+• Détails: ${env.BUILD_URL}"""
+                )
+            }
+        }
+        unstable {
+            script {
+                slackSend(
+                    channel: "${env.SLACK_CHANNEL}",
+                    color: "warning",
+                    message: """⚠️ INSTABLE: ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Branche: ${env.BRANCH_NAME}
+• Détails: ${env.BUILD_URL}"""
+                )
+            }
         }
     }
 }
