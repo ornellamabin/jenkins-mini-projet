@@ -20,7 +20,9 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
-                    sh 'mvn clean compile'
+                    dir('springbootapp') {
+                        sh 'mvn clean compile'
+                    }
                 }
             }
         }
@@ -29,7 +31,9 @@ pipeline {
             steps {
                 script {
                     echo '🧪 Exécution des tests...'
-                    sh 'mvn test'
+                    dir('springbootapp') {
+                        sh 'mvn test'
+                    }
                 }
             }
         }
@@ -38,7 +42,9 @@ pipeline {
             steps {
                 script {
                     echo '📦 Création du JAR...'
-                    sh 'mvn package -DskipTests'
+                    dir('springbootapp') {
+                        sh 'mvn package -DskipTests'
+                    }
                 }
             }
         }
