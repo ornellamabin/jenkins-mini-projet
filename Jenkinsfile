@@ -20,9 +20,7 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Construction du projet...'
-                    dir('springbootapp') {
-                        sh 'mvn clean compile'
-                    }
+                    sh 'mvn clean compile'  // À LA RACINE
                 }
             }
         }
@@ -31,9 +29,7 @@ pipeline {
             steps {
                 script {
                     echo '🧪 Exécution des tests...'
-                    dir('springbootapp') {
-                        sh 'mvn test'
-                    }
+                    sh 'mvn test'  // À LA RACINE
                 }
             }
         }
@@ -42,23 +38,9 @@ pipeline {
             steps {
                 script {
                     echo '📦 Création du JAR...'
-                    dir('springbootapp') {
-                        sh 'mvn package -DskipTests'
-                    }
+                    sh 'mvn package -DskipTests'  // À LA RACINE
                 }
             }
-        }
-    }
-    
-    post {
-        always {
-            echo '🧹 Nettoyage de l espace de travail...'
-        }
-        success {
-            echo '✅ Pipeline exécuté avec succès!'
-        }
-        failure {
-            echo '❌ Échec du pipeline!'
         }
     }
 }
