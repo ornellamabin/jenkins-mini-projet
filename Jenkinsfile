@@ -1,14 +1,12 @@
 pipeline {
-    agent any  // Changé de 'docker' à 'any' car Docker n'est pas installé
+    agent any
     
-    environment {
-        // Configuration de base
-        DOCKER_IMAGE = 'votreusername/springboot-app'
-        DOCKER_TAG = "${env.BRANCH_NAME == 'main' ? 'latest' : env.BRANCH_NAME}"
+    tools {
+        maven 'M3'      // Doit correspondre au nom dans Jenkins
+        jdk 'jdk17'     // Doit correspondre au nom dans Jenkins
     }
     
     stages {
-        // ÉTAPE 1: TESTS AUTOMATISÉS
         stage('Tests Automatisés') {
             steps {
                 script {
@@ -23,7 +21,6 @@ pipeline {
             }
         }
         
-        // ÉTAPE 2: QUALITÉ DE CODE AVEC SONARCLOUD
         stage('Qualité de Code') {
             when {
                 expression { 
@@ -33,22 +30,17 @@ pipeline {
             steps {
                 script {
                     echo '🔍 Analyse statique avec SonarCloud...'
-                    // SonarCloud sera ajouté plus tard
                     echo 'SonarCloud configuré mais non exécuté (besoin de credentials)'
                 }
             }
         }
         
-        // ÉTAPE 3: COMPILATION ET PACKAGING
         stage('Compilation et Packaging') {
             steps {
                 script {
                     echo '📦 Compilation et création du JAR...'
                     sh 'mvn clean package -DskipTests'
                     echo '✅ JAR créé avec succès!'
-                    
-                    // Docker désactivé temporairement
-                    echo '🐳 Docker désactivé (non installé sur Jenkins)'
                 }
             }
         }
@@ -56,26 +48,15 @@ pipeline {
     
     post {
         always {
-            script {
-                echo '🧹 Nettoyage des ressources...'
-                // Pas de docker logout car Docker n'est pas installé
-            }
+            echo '🧹 Nettoyage des ressources...'
         }
         
         success {
-            script {
-                echo '✅ Pipeline exécutée avec succès!'
-                // Slack désactivé temporairement
-                echo '📧 Notification Slack désactivée (configuration manquante)'
-            }
+            echo '✅ Pipeline exécutée avec succès!'
         }
         
         failure {
-            script {
-                echo '❌ Pipeline en échec!'
-                // Slack désactivé temporairement
-                echo '📧 Notification Slack désactivée (configuration manquante)'
-            }
+            echo '❌ Pipeline en échec!'
         }
     }
 }
