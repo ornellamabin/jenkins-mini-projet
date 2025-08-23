@@ -1,59 +1,33 @@
 package com.example.springbootapp;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.test.web.server.LocalServerPort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Tests unitaires pour HelloController
- */
-@ExtendWith(MockitoExtension.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class HelloControllerTest {
 
-    @InjectMocks
-    private HelloController helloController;
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     @Test
-    void testSayHello() {
-        // When
-        ResponseEntity<String> response = helloController.sayHello();
-        
-        // Then
-        assertThat(response.getStatusCodeValue()).isEqualTo(200);
-        assertThat(response.getBody()).isEqualTo("Hello Jenkins CI/CD!");
+    void helloShouldReturnDefaultMessage() {
+        String url = "http://localhost:" + port + "/";
+        String response = restTemplate.getForObject(url, String.class);
+        assertThat(response).contains("Hello from Jenkins");
     }
 
     @Test
-    void testHealthCheck() {
-        // When
-        ResponseEntity<String> response = helloController.healthCheck();
-        
-        // Then
-        assertThat(response.getStatusCodeValue()).isEqualTo(200);
-        assertThat(response.getBody()).isEqualTo("Application is running successfully!");
-    }
-
-    @Test
-    void testGreetUserWithDefault() {
-        // When
-        ResponseEntity<String> response = helloController.greetUser(null);
-        
-        // Then
-        assertThat(response.getStatusCodeValue()).isEqualTo(200);
-        assertThat(response.getBody()).isEqualTo("Hello Guest! Welcome to our CI/CD pipeline!");
-    }
-
-    @Test
-    void testGreetUserWithName() {
-        // When
-        ResponseEntity<String> response = helloController.greetUser("Alice");
-        
-        // Then
-        assertThat(response.getStatusCodeValue()).isEqualTo(200);
-        assertThat(response.getBody()).isEqualTo("Hello Alice! Welcome to our CI/CD pipeline!");
+    void apiTestShouldReturnSuccess() {
+        String url = "http://localhost:" + port + "/api/test";
+        String response = restTemplate.getForObject(url, String.class);
+        assertThat(response).contains("API working");
     }
 }
