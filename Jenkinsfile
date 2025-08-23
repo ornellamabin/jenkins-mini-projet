@@ -60,6 +60,24 @@ pipeline {
                 }
             }
         }
+        // etape 5 : deploiement 
+        stage('Déploiement Production') {
+            steps {
+              sshagent(['ssh-credentials']) {
+                sh '''
+                    ssh user@production-server "
+                        docker pull ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker stop springboot-app || true
+                        docker rm springboot-app || true
+                        docker run -d -p 8080:8080 \
+                        --name springboot-app \
+                        --restart unless-stopped \
+                        ${DOCKER_IMAGE}:${DOCKER_TAG}
+                "
+            '''
+        }
+    }
+}
     }
     
     post {
