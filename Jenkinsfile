@@ -37,7 +37,7 @@ pipeline {
         stage('Package') {
             steps {
                 script {
-                    echo '📦 Création du package...'
+                    echo '📦 Création du JAR...'
                     sh 'mvn package -DskipTests'
                 }
             }
@@ -46,13 +46,13 @@ pipeline {
     
     post {
         always {
-            echo '🧹 Nettoyage...'
+            echo '🧹 Nettoyage de l espace de travail...'
+        }
+        success {
+            echo '✅ Pipeline exécuté avec succès!'
         }
         failure {
             echo '❌ Échec du pipeline!'
-        }
-        success {
-            echo '✅ Pipeline réussi!'
         }
     }
 }
