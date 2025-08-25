@@ -1,77 +1,123 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.8-openjdk-17'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
     
     environment {
-        DOCKER_IMAGE = 'gseha/python-app'
+        DOCKER_IMAGE = 'gseha/springboot-app'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
     
     stages {
-        stage('Test Docker Integration') {
+        stage('Unit Tests') {
             steps {
-                echo '🎯 Testing Docker...'
-                sh '''
-                    docker --version
-                    docker run --rm hello-world
-                    echo "✅ Docker operational!"
-                '''
+                echo '🧪 Running unit tests...'
+                sh 'mvn test'
             }
         }
         
-        stage('Build Image') {
+        stage('Code Quality - SonarCloud') {
             steps {
-                echo '🏗️ Building...'
-                sh """
+                echo '🔍 Analyzing code quality...'
+                withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=your-project \
+                          -Dsonar.organization=your-org \
+                          -Dsonar.host.url=https://sonarcloud.io \
+                          -Dsonar.login=$SONAR_TOKEN
+                    '''
+                }
+            }
+        }
+        
+        stage('Build and Package') {
+            steps {
+                echo '🏗️ Building application...'
+                sh '''
+                    mvn clean package
                     docker build -t ${DOCKER_IMAGE}:latest .
                     docker tag ${DOCKER_IMAGE}:latest ${DOCKER_IMAGE}:${DOCKER_TAG}
-                    echo "✅ Image built!"
-                """
+                '''
             }
         }
         
         stage('Push to Docker Hub') {
             steps {
-                echo '📤 Pushing...'
+                echo '📤 Pushing to Docker Hub...'
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-credentials',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
-                    sh """
+                    sh '''
+                        docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
                         docker push ${DOCKER_IMAGE}:latest
                         docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                        echo "🎉 Pushed to Docker Hub!"
+                    '''
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            steps {
+                echo '🚀 Deploying to staging...'
+                sshagent(['ssh-staging-credentials']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no user@staging-server "
+                            docker pull ${DOCKER_IMAGE}:latest
+                            docker stop staging-app || true
+                            docker rm staging-app || true
+                            docker run -d --name staging-app -p 3000:8080 ${DOCKER_IMAGE}:latest
+                        "
                     """
                 }
             }
         }
         
-        stage('Deploy') {
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
             steps {
-                echo '🚀 Deploying...'
-                script {
+                echo '🎯 Deploying to production...'
+                sshagent(['ssh-production-credentials']) {
                     sh """
-                        # Arrêter tout conteneur utilisant le port 3000
-                        docker stop python-app test-app 2>/dev/null || true
-                        docker rm python-app test-app 2>/dev/null || true
-                        
-                        # Démarrer l'application sur un port différent si nécessaire
-                        docker run -d --name python-app -p 3000:3000 ${DOCKER_IMAGE}:latest
-                        sleep 8
-                        curl -f http://localhost:3000 && echo "✅ App running!" || echo "⚠️ Check app manually"
+                        ssh -o StrictHostKeyChecking=no user@production-server "
+                            docker pull ${DOCKER_IMAGE}:latest
+                            docker stop production-app || true
+                            docker rm production-app || true
+                            docker run -d --name production-app -p 80:8080 ${DOCKER_IMAGE}:latest
+                        "
                     """
                 }
+            }
+        }
+        
+        stage('Validation Tests') {
+            steps {
+                echo '✅ Running validation tests...'
+                sh '''
+                    # Tests de validation après déploiement
+                    curl -f http://staging-server:3000/health || echo "Staging health check failed"
+                    if [ "${env.BRANCH_NAME}" = "main" ]; then
+                        curl -f http://production-server/health || echo "Production health check failed"
+                    fi
+                '''
             }
         }
     }
     
     post {
-        success {
-            echo '🏆 SUCCÈS TOTAL! Pipeline CI/CD opérationnel!'
-            echo '🎉 Vos images sont sur Docker Hub: https://hub.docker.com/r/gseha/python-app'
-        }
-        failure {
-            echo '❌ Échec - Vérifiez les logs'
+        always {
+            slackSend(
+                channel: '#jenkins-notifications',
+                message: "Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
+                color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger'
+            )
         }
     }
 }
