@@ -6,11 +6,6 @@ pipeline {
         }
     }
     
-    environment {
-        // Optionnel : retirez si vous n'avez pas encore configuré les credentials
-        // DOCKERHUB_CREDENTIALS = credentials('docker-hub-credentials')
-    }
-    
     stages {
         stage('Checkout') {
             steps {
@@ -47,21 +42,6 @@ pipeline {
             }
         }
         
-        // Étape optionnelle pour le moment - commentez-la
-        /*
-        stage('Push to Docker Hub') {
-            steps {
-                echo '📤 Pushing to Docker Hub...'
-                script {
-                    sh '''
-                        docker login -u $DOCKERHUB_CREDENTIALS_USR -p $DOCKERHUB_CREDENTIALS_PSW
-                        docker push gseha/python-app:latest
-                    '''
-                }
-            }
-        }
-        */
-        
         stage('Deploy to Staging') {
             steps {
                 echo '🚀 Deploying to staging...'
@@ -81,8 +61,6 @@ pipeline {
             echo "Build status: ${currentBuild.currentResult}"
             script {
                 echo '🧹 Cleaning up...'
-                // Commande simplifiée pour éviter l'erreur de contexte
-                sh 'docker logout || true'
             }
         }
         success {
