@@ -1,10 +1,5 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.8-openjdk-17'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
-        }
-    }
+    agent any
     
     environment {
         DOCKER_IMAGE = 'gseha/springboot-app'
@@ -12,10 +7,25 @@ pipeline {
     }
     
     stages {
+        stage('Setup') {
+            steps {
+                echo '🔧 Setting up environment...'
+                sh '''
+                    echo "Java version:"
+                    java -version
+                    echo "Docker version:"
+                    docker --version
+                    echo "Maven Wrapper:"
+                    chmod +x mvnw  # Assure que le wrapper est exécutable
+                    ./mvnw --version
+                '''
+            }
+        }
+        
         stage('Unit Tests') {
             steps {
                 echo '🧪 Running unit tests...'
-                sh 'mvn test'
+                sh './mvnw test'
             }
         }
         
@@ -24,7 +34,7 @@ pipeline {
                 echo '🔍 Analyzing code quality...'
                 withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
-                        mvn sonar:sonar \
+                        ./mvnw sonar:sonar \
                           -Dsonar.projectKey=ornellamabin-springboot-app \
                           -Dsonar.organization=ornellamabin \
                           -Dsonar.host.url=https://sonarcloud.io \
@@ -37,7 +47,7 @@ pipeline {
         stage('Build and Package') {
             steps {
                 echo '🏗️ Building application...'
-                sh 'mvn clean package'
+                sh './mvnw clean package'
             }
         }
         
@@ -138,7 +148,7 @@ pipeline {
         
         cleanup {
             echo '🧹 Cleaning up...'
-            sh 'docker logout'
+            sh 'docker logout || true'
         }
     }
 }
