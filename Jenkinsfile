@@ -26,6 +26,7 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 echo '🧪 Running unit tests...'
+                // CORRECTION : Ajouter les guillemets corrects
                 sh 'python -c "import flask; print(\"Flask version:\", flask.__version__)"'
                 script {
                     sh 'python -c "from app import app; print(\"App imported successfully\")"'
