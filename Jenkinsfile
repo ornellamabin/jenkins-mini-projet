@@ -40,7 +40,7 @@ pipeline {
                 withSonarQubeEnv('SonarCloud') {
                     sh '''
                         mvn sonar:sonar \
-                          -Dsonar.projectKey=ornellamabin_springboot-app \
+                          -Dsonar.projectKey=ornellamabin_jeinkins-mini-projet \
                           -Dsonar.organization=ornellamabin \
                           -Dsonar.host.url=https://sonarcloud.io \
                           -Dsonar.login=$SONAR_TOKEN \
