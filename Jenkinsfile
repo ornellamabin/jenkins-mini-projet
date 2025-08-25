@@ -6,10 +6,6 @@ pipeline {
         }
     }
     
-    environment {
-        PYTHON_VERSION = '3.9'
-    }
-    
     stages {
         stage('Checkout') {
             steps {
@@ -17,12 +13,14 @@ pipeline {
             }
         }
         
-        stage('Setup Python') {
+        stage('Setup Python Environment') {
             steps {
-                echo '🐍 Setting up Python...'
+                echo '🐍 Setting up Python virtual environment...'
                 sh '''
                     apk add --no-cache python3 py3-pip
-                    python3 -m pip install --upgrade pip
+                    python3 -m venv /opt/venv
+                    . /opt/venv/bin/activate
+                    pip install --upgrade pip
                 '''
             }
         }
@@ -30,7 +28,10 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo '📦 Installing Python dependencies...'
-                sh 'pip3 install -r requirements.txt'
+                sh '''
+                    . /opt/venv/bin/activate
+                    pip install -r requirements.txt
+                '''
             }
         }
         
