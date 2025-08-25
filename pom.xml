@@ -29,6 +29,17 @@
         <maven-surefire-plugin.version>3.1.2</maven-surefire-plugin.version>
         <jacoco.version>0.8.10</jacoco.version>
         <sonar-maven-plugin.version>3.10.0.2594</sonar-maven-plugin.version>
+        
+        <!-- Configuration SonarCloud SPECIFIQUE -->
+        <sonar.organization>ornellamabin</sonar.organization>
+        <sonar.projectKey>ornellamabin_jenkins-mini-projet</sonar.projectKey>
+        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+        <sonar.login>${env.SONAR_TOKEN}</sonar.login>
+        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+        <sonar.junit.reportPaths>${project.build.directory}/surefire-reports</sonar.junit.reportPaths>
+        <sonar.sourceEncoding>UTF-8</sonar.sourceEncoding>
+        <sonar.java.source>${java.version}</sonar.java.source>
+        <sonar.java.target>${java.version}</sonar.java.target>
     </properties>
 
     <dependencies>
@@ -79,13 +90,21 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                    <excludes>
+                        <exclude>**/*IntegrationTest.java</exclude>
+                    </excludes>
+                </configuration>
             </plugin>
 
             <!-- Jacoco Plugin pour la couverture de code -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>${jacoco.version}</version>
+                <version>${jacoco.version</version>
                 <executions>
                     <execution>
                         <goals>
@@ -98,6 +117,9 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/site/jacoco</outputDirectory>
+                        </configuration>
                     </execution>
                     <execution>
                         <id>check</id>
@@ -122,6 +144,57 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- Plugin SonarQube -->
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>${sonar-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sonar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <!-- Profil pour l'analyse SonarQube -->
+    <profiles>
+        <profile>
+            <id>sonar</id>
+            <activation>
+                <property>
+                    <name>env.SONAR_TOKEN</name>
+                </property>
+            </activation>
+            <properties>
+                <sonar.login>${env.SONAR_TOKEN}</sonar.login>
+                <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+                <sonar.junit.reportPaths>${project.build.directory}/surefire-reports</sonar.junit.reportPaths>
+                <sonar.tests>src/test/java</sonar.tests>
+            </properties>
+        </profile>
+        
+        <profile>
+            <id>skip-sonar</id>
+            <properties>
+                <sonar.skip>true</sonar.skip>
+            </properties>
+        </profile>
+    </profiles>
+
+    <!-- Reporting -->
+    <reporting>
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+            </plugin>
+        </plugins>
+    </reporting>
 </project>
