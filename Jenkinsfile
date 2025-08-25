@@ -25,8 +25,8 @@ pipeline {
                 withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
                         mvn sonar:sonar \
-                          -Dsonar.projectKey=your-project \
-                          -Dsonar.organization=your-org \
+                          -Dsonar.projectKey=ornellamabin-springboot-app \
+                          -Dsonar.organization=ornellamabin \
                           -Dsonar.host.url=https://sonarcloud.io \
                           -Dsonar.login=$SONAR_TOKEN
                     '''
