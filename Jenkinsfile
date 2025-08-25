@@ -2,7 +2,7 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_IMAGE = 'gseha/python-app'  // ← Changez 'gseha' par votre username Docker Hub
+        DOCKER_IMAGE = 'gseha/python-app'  // ← Changez 'gseha' par votre username
         DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
     
@@ -34,83 +34,48 @@ pipeline {
             }
         }
         
-        stage('Verify Docker Hub Access') {
+        stage('Check Docker Hub Token Permissions') {
             steps {
-                echo '🔐 Testing Docker Hub permissions...'
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-credentials',
-                    usernameVariable: 'DOCKER_USER', 
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
-                    script {
-                        sh '''
-                            # Test de connexion
-                            docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
-                            echo "✅ Docker Hub login successful!"
-                            
-                            # Test des permissions avec une image simple
-                            docker pull hello-world
-                            docker tag hello-world ${DOCKER_IMAGE}-test:permissions-check
-                            docker push ${DOCKER_IMAGE}-test:permissions-check || echo "❌ Push permissions test failed - check token has write access"
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Push to Docker Hub') {
-            steps {
-                echo '📤 Pushing to Docker Hub...'
+                echo '🔍 Checking token permissions...'
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-credentials',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
                     script {
-                        sh """
-                            # Push de l'image principale
-                            docker push ${DOCKER_IMAGE}:latest
-                            docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                            echo "🎉 Successfully pushed to Docker Hub!"
-                        """
+                        sh '''
+                            # Test de connexion de base
+                            docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
+                            echo "✅ Login successful!"
+                            
+                            # Test spécifique des permissions
+                            echo "Testing token permissions..."
+                            
+                            # Essayer de créer un repository de test
+                            curl -s -u "$DOCKER_USER:$DOCKER_PASSWORD" \
+                            -X POST \
+                            -H "Content-Type: application/json" \
+                            -d '{"namespace":"'$DOCKER_USER'", "name":"test-permissions", "is_private":true}' \
+                            "https://hub.docker.com/v2/repositories/" \
+                            || echo "❌ Token missing write permissions - create new token with Read & Write access"
+                        '''
                     }
-                }
-            }
-        }
-        
-        stage('Deploy and Test') {
-            steps {
-                echo '🚀 Deploying application...'
-                script {
-                    sh """
-                        docker stop python-app || true
-                        docker rm python-app || true
-                        docker run -d --name python-app -p 3000:3000 ${DOCKER_IMAGE}:latest
-                        sleep 10  # Donner plus de temps pour démarrer
-                        curl -f http://localhost:3000 && echo "✅ Application is running!" || echo "⚠️ Application may be starting..."
-                    """
                 }
             }
         }
     }
     
     post {
-        success {
-            echo '🏆 PIPELINE COMPLETED SUCCESSFULLY!'
-            // slackSend(message: "SUCCESS: Docker pipeline completed - Build ${env.BUILD_NUMBER}")
-        }
         failure {
-            echo '❌ Pipeline failed - check Docker Hub token permissions'
-            // slackSend(message: "FAILURE: Build ${env.BUILD_NUMBER} - Check token permissions")
+            echo '❌ ÉCHEC : Token Docker Hub sans permissions écriture'
+            echo '📋 SOLUTION :'
+            echo '1. Allez sur https://hub.docker.com/settings/security'
+            echo '2. Créez un nouveau token avec permissions "Read, Write, Delete"'
+            echo '3. Mettez à jour les credentials dans Jenkins'
+            echo '4. Relancez le pipeline'
         }
         always {
-            echo '🧹 Cleaning up test images...'
-            script {
-                sh '''
-                    docker rmi ${DOCKER_IMAGE}-test:permissions-check 2>/dev/null || true
-                    echo "Cleanup completed"
-                '''
-            }
+            echo '🧹 Cleaning up...'
         }
     }
 }
