@@ -26,11 +26,17 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 echo '🧪 Running unit tests...'
-                // COMMANDE CORRIGÉE :
+                // Commande Python corrigée
                 sh "python -c \"import flask; print('Flask version:', flask.__version__)\""
                 
-                // Test supplémentaire pour vérifier que l'application fonctionne
-                sh "python -c \"from app import app; print('App imported successfully')\"" || echo "No app.py found, continuing..."
+                // Test supplémentaire avec gestion d'erreur Jenkins
+                script {
+                    try {
+                        sh "python -c \"from app import app; print('App imported successfully')\""
+                    } catch (Exception e) {
+                        echo "No app.py found, continuing..."
+                    }
+                }
             }
         }
         
