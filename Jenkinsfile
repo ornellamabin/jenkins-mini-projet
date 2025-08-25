@@ -7,7 +7,8 @@ pipeline {
     }
     
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('docker-hub-credentials')
+        // Optionnel : retirez si vous n'avez pas encore configuré les credentials
+        // DOCKERHUB_CREDENTIALS = credentials('docker-hub-credentials')
     }
     
     stages {
@@ -46,6 +47,8 @@ pipeline {
             }
         }
         
+        // Étape optionnelle pour le moment - commentez-la
+        /*
         stage('Push to Docker Hub') {
             steps {
                 echo '📤 Pushing to Docker Hub...'
@@ -57,6 +60,7 @@ pipeline {
                 }
             }
         }
+        */
         
         stage('Deploy to Staging') {
             steps {
@@ -75,8 +79,11 @@ pipeline {
     post {
         always {
             echo "Build status: ${currentBuild.currentResult}"
-            echo '🧹 Cleaning up...'
-            sh 'which docker && docker logout || true'
+            script {
+                echo '🧹 Cleaning up...'
+                // Commande simplifiée pour éviter l'erreur de contexte
+                sh 'docker logout || true'
+            }
         }
         success {
             echo '🎉 Build successful! Application is running on http://localhost:5000'
