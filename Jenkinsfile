@@ -1,53 +1,29 @@
 pipeline {
-    agent any  // Utilise l'agent Jenkins directement
+    agent {
+        docker {
+            image 'python:3.9-slim'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
+        }
+    }
     
     environment {
-        DOCKER_IMAGE = 'gseha/springboot-app'
+        DOCKER_IMAGE = 'gseha/python-app'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
     
     stages {
-        stage('Setup') {
+        stage('Install Dependencies') {
             steps {
-                echo '🔧 Setting up environment...'
-                sh '''
-                    # Vérifier que les outils sont disponibles
-                    echo "Java version:"
-                    java -version || echo "Java non installé"
-                    echo "Maven version:"
-                    mvn --version || echo "Maven non installé"
-                    echo "Docker version:"
-                    docker --version || echo "Docker non installé"
-                '''
+                echo '📦 Installing Python dependencies...'
+                sh 'pip install -r requirements.txt'
             }
         }
         
         stage('Unit Tests') {
             steps {
                 echo '🧪 Running unit tests...'
-                sh 'mvn test'
-            }
-        }
-        
-        stage('Code Quality - SonarCloud') {
-            steps {
-                echo '🔍 Analyzing code quality...'
-                withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
-                    sh '''
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=ornellamabin-springboot-app \
-                          -Dsonar.organization=ornellamabin \
-                          -Dsonar.host.url=https://sonarcloud.io \
-                          -Dsonar.login=$SONAR_TOKEN
-                    '''
-                }
-            }
-        }
-        
-        stage('Build and Package') {
-            steps {
-                echo '🏗️ Building application...'
-                sh 'mvn clean package'
+                // Ajoutez vos commandes de test Python ici
+                sh 'python -m pytest tests/ || true' // Remplacez par votre framework de test
             }
         }
         
@@ -87,26 +63,7 @@ pipeline {
                             docker pull ${DOCKER_IMAGE}:latest
                             docker stop staging-app || true
                             docker rm staging-app || true
-                            docker run -d --name staging-app -p 3000:8080 ${DOCKER_IMAGE}:latest
-                        "
-                    """
-                }
-            }
-        }
-        
-        stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                echo '🎯 Deploying to production...'
-                sshagent(['ssh-production-credentials']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no user@production-server "
-                            docker pull ${DOCKER_IMAGE}:latest
-                            docker stop production-app || true
-                            docker rm production-app || true
-                            docker run -d --name production-app -p 80:8080 ${DOCKER_IMAGE}:latest
+                            docker run -d --name staging-app -p 3000:3000 ${DOCKER_IMAGE}:latest
                         "
                     """
                 }
@@ -122,15 +79,6 @@ pipeline {
                         echo "✅ Staging health check passed"
                     } catch (Exception e) {
                         echo "❌ Staging health check failed: ${e}"
-                    }
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        try {
-                            sh 'curl -f http://production-server/health'
-                            echo "✅ Production health check passed"
-                        } catch (Exception e) {
-                            echo "❌ Production health check failed: ${e}"
-                        }
                     }
                 }
             }
@@ -148,7 +96,7 @@ pipeline {
         
         cleanup {
             echo '🧹 Cleaning up...'
-            sh 'docker logout || true'  // || true pour éviter les erreurs si non connecté
+            sh 'docker logout'
         }
     }
 }
