@@ -86,7 +86,7 @@ pipeline {
         
         cleanup {
             echo '🧹 Cleaning up...'
-            sh 'docker logout || true'  # || true pour éviter l'échec du cleanup
+            sh 'docker logout || true'  // || true pour éviter l'échec du cleanup
         }
     }
 }
