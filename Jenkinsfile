@@ -1,9 +1,13 @@
 pipeline {
     agent {
         docker {
-            image 'python:3.9-slim'
-            args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
+            image 'docker:latest'
+            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
         }
+    }
+    
+    environment {
+        PYTHON_VERSION = '3.9'
     }
     
     stages {
@@ -13,48 +17,38 @@ pipeline {
             }
         }
         
-        stage('Install Dependencies') {
+        stage('Setup Python') {
             steps {
-                echo '📦 Installing Python dependencies...'
+                echo '🐍 Setting up Python...'
                 sh '''
-                    mkdir -p /tmp/pip-cache
-                    pip install --cache-dir /tmp/pip-cache -r requirements.txt
+                    apk add --no-cache python3 py3-pip
+                    python3 -m pip install --upgrade pip
                 '''
             }
         }
         
-        // COMMENTEZ cette étape temporairement
-        /*
-        stage('Unit Tests') {
+        stage('Install Dependencies') {
             steps {
-                echo '🧪 Running unit tests...'
-                sh 'python -c "import flask; print(\"Flask version:\", flask.__version__)"'
-                script {
-                    sh 'python -c "from app import app; print(\"App imported successfully\")"'
-                }
+                echo '📦 Installing Python dependencies...'
+                sh 'pip3 install -r requirements.txt'
             }
         }
-        */
         
         stage('Build Docker Image') {
             steps {
                 echo '🐳 Building Docker image...'
-                script {
-                    sh 'docker build -t gseha/python-app:latest .'
-                }
+                sh 'docker build -t gseha/python-app:latest .'
             }
         }
         
         stage('Deploy to Staging') {
             steps {
                 echo '🚀 Deploying to staging...'
-                script {
-                    sh '''
-                        docker stop python-app || true
-                        docker rm python-app || true
-                        docker run -d --name python-app -p 5000:5000 gseha/python-app:latest
-                    '''
-                }
+                sh '''
+                    docker stop python-app || true
+                    docker rm python-app || true
+                    docker run -d --name python-app -p 5000:5000 gseha/python-app:latest
+                '''
             }
         }
     }
