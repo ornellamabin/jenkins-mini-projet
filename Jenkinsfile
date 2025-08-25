@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'maven:3.8-openjdk-17'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
         }
     }
     
@@ -37,8 +37,14 @@ pipeline {
         stage('Build and Package') {
             steps {
                 echo '🏗️ Building application...'
+                sh 'mvn clean package'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                echo '🐳 Building Docker image...'
                 sh '''
-                    mvn clean package
                     docker build -t ${DOCKER_IMAGE}:latest .
                     docker tag ${DOCKER_IMAGE}:latest ${DOCKER_IMAGE}:${DOCKER_TAG}
                 '''
@@ -54,7 +60,7 @@ pipeline {
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
                     sh '''
-                        docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
+                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USER --password-stdin
                         docker push ${DOCKER_IMAGE}:latest
                         docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
                     '''
@@ -100,13 +106,23 @@ pipeline {
         stage('Validation Tests') {
             steps {
                 echo '✅ Running validation tests...'
-                sh '''
-                    # Tests de validation après déploiement
-                    curl -f http://staging-server:3000/health || echo "Staging health check failed"
-                    if [ "${env.BRANCH_NAME}" = "main" ]; then
-                        curl -f http://production-server/health || echo "Production health check failed"
-                    fi
-                '''
+                script {
+                    try {
+                        sh 'curl -f http://staging-server:3000/health'
+                        echo "✅ Staging health check passed"
+                    } catch (Exception e) {
+                        echo "❌ Staging health check failed: ${e}"
+                    }
+                    
+                    if (env.BRANCH_NAME == 'main') {
+                        try {
+                            sh 'curl -f http://production-server/health'
+                            echo "✅ Production health check passed"
+                        } catch (Exception e) {
+                            echo "❌ Production health check failed: ${e}"
+                        }
+                    }
+                }
             }
         }
     }
@@ -118,6 +134,11 @@ pipeline {
                 message: "Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${currentBuild.currentResult}",
                 color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger'
             )
+        }
+        
+        cleanup {
+            echo '🧹 Cleaning up...'
+            sh 'docker logout'
         }
     }
 }
