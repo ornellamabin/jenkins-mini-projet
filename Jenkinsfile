@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent any  // Utilise l'agent Jenkins directement
     
     environment {
         DOCKER_IMAGE = 'gseha/springboot-app'
@@ -11,13 +11,13 @@ pipeline {
             steps {
                 echo '🔧 Setting up environment...'
                 sh '''
+                    # Vérifier que les outils sont disponibles
                     echo "Java version:"
-                    java -version
+                    java -version || echo "Java non installé"
+                    echo "Maven version:"
+                    mvn --version || echo "Maven non installé"
                     echo "Docker version:"
-                    docker --version
-                    echo "Maven Wrapper:"
-                    chmod +x mvnw  # Assure que le wrapper est exécutable
-                    ./mvnw --version
+                    docker --version || echo "Docker non installé"
                 '''
             }
         }
@@ -25,7 +25,7 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 echo '🧪 Running unit tests...'
-                sh './mvnw test'
+                sh 'mvn test'
             }
         }
         
@@ -34,7 +34,7 @@ pipeline {
                 echo '🔍 Analyzing code quality...'
                 withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
-                        ./mvnw sonar:sonar \
+                        mvn sonar:sonar \
                           -Dsonar.projectKey=ornellamabin-springboot-app \
                           -Dsonar.organization=ornellamabin \
                           -Dsonar.host.url=https://sonarcloud.io \
@@ -47,7 +47,7 @@ pipeline {
         stage('Build and Package') {
             steps {
                 echo '🏗️ Building application...'
-                sh './mvnw clean package'
+                sh 'mvn clean package'
             }
         }
         
@@ -148,7 +148,7 @@ pipeline {
         
         cleanup {
             echo '🧹 Cleaning up...'
-            sh 'docker logout || true'
+            sh 'docker logout || true'  // || true pour éviter les erreurs si non connecté
         }
     }
 }
