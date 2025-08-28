@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'maven:3.8.6-openjdk-17'
-            args '-v /root/.m2:/root/.m2 -v /var/run/docker.sock:/var/run/docker.sock'
+            args '-v /root/.m2:/root/.m2 -v /var/run/docker.sock:/var/run/docker.sock --group-add 999'
         }
     }
     environment {
