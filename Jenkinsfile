@@ -1,11 +1,15 @@
 pipeline {
     agent {
         docker {
-            image 'maven:3.8.6-openjdk-17'
-            args '-v /root/.m2:/root/.m2 -v /var/run/docker.sock:/var/run/docker.sock -u root:root'
+            image 'docker:20.10.23-dind'
+            args '--privileged --network host -v /root/.m2:/root/.m2'
         }
     }
     environment {
+        // 🔹 Configuration Maven
+        MAVEN_HOME = '/usr/share/maven'
+        PATH = "${MAVEN_HOME}/bin:${PATH}"
+        
         // 🔹 Variables Docker
         DOCKER_IMAGE = "gseha/springboot-app:${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
         DOCKER_REGISTRY_CREDENTIALS = 'dockerhub-credentials'
@@ -19,6 +23,13 @@ pipeline {
         SONAR_SCANNER_HOME = tool 'SonarQubeScanner'
     }
     stages {
+        // Étape 0: Installation de Maven
+        stage('Setup Maven') {
+            steps {
+                sh 'apk add --no-cache maven'
+            }
+        }
+
         // Étape 1: Récupération du code
         stage('Checkout SCM') {
             steps {
