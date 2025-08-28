@@ -28,9 +28,6 @@ pipeline {
 
         // ÉTAPE SIMPLIFIÉE : Déploiement direct du JAR
         stage('Deploy to Staging') {
-            when {
-                branch 'develop'
-            }
             steps {
                 script {
                     echo "🚀 Déploiement sur Staging (${STAGING_SERVER_IP})..."
