@@ -1,0 +1,18 @@
+# Ignorer fichiers système Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Ignorer dossiers personnels/système
+AppData/
+OneDrive/
+.vscode/
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Ignorer dossiers VirtualBox, Docker, etc.
+.VirtualBox/
+.docker/
