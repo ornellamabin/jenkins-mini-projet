@@ -34,3 +34,6 @@ alpinehelloworld/
 # Logs
 *.log
 logs/
+
+# Dossiers de build (Java / Maven)
+target/
