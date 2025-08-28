@@ -1,30 +1,41 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.8.6-openjdk-17'
+            args '-v /root/.m2:/root/.m2'
+        }
+    }
+    
     stages {
-        stage('Build') {
+        stage('Checkout Code') {
             steps {
-                sh 'mvn clean package'
+                git branch: 'main', 
+                    url: 'https://github.com/votre-username/jenkins-mini-projet.git'
             }
         }
-        stage('Test') {
+        
+        stage('Build Application') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+        
+        stage('Run Tests') {
             steps {
                 sh 'mvn test'
             }
         }
-        stage('Build Docker Image') {
+        
+        stage('Package JAR') {
             steps {
-                sh 'docker build -t gseha/springboot-app:latest .'
+                sh 'mvn package -DskipTests'
             }
         }
-        stage('Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        docker login -u $DOCKER_USER -p $DOCKER_PASS
-                        docker push gseha/springboot-app:latest
-                    '''
-                }
-            }
+    }
+    
+    post {
+        always {
+            echo 'Pipeline execution completed'
         }
     }
 }

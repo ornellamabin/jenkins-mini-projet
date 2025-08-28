@@ -1,12 +1,13 @@
-FROM python:3.9-slim
+FROM openjdk:17-jdk-slim
 
+# Set working directory
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Copy the built jar file
+COPY target/springboot-app-1.0.0.jar app.jar
 
-COPY app.py .
+# Expose port
+EXPOSE 8081
 
-EXPOSE 3000
-
-CMD ["python", "app.py"]
+# Run the application
+ENTRYPOINT ["java", "-jar", "app.jar"]
