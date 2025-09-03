@@ -1,9 +1,10 @@
 pipeline {
-    agent any // Utilise le nœud Jenkins directement
+    agent any
     
     environment {
         STAGING_SERVER_IP = '3.27.150.136'
         STAGING_SSH_CREDENTIALS = 'ec2-production-key'
+        JAR_FILE = sh(script: 'ls target/*.jar | head -1', returnStdout: true).trim()
     }
     
     stages {
@@ -23,33 +24,43 @@ pipeline {
             steps {
                 sh 'mvn package -DskipTests'
                 archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+                script {
+                    JAR_FILE = sh(script: 'ls target/*.jar | head -1', returnStdout: true).trim()
+                }
             }
         }
 
-        // ÉTAPE SIMPLIFIÉE : Déploiement direct du JAR
         stage('Deploy to Staging') {
             steps {
                 script {
                     echo "🚀 Déploiement sur Staging (${STAGING_SERVER_IP})..."
                     sshagent(["${STAGING_SSH_CREDENTIALS}"]) {
-                        // Copie le JAR sur le serveur
+                        // Vérification et copie
                         sh """
-                            scp -o StrictHostKeyChecking=no target/springboot-app-1.0.0.jar ec2-user@${STAGING_SERVER_IP}:/home/ec2-user/
+                            set -e
+                            ls -la ${JAR_FILE} || exit 1
+                            scp -o StrictHostKeyChecking=no ${JAR_FILE} ec2-user@${STAGING_SERVER_IP}:/home/ec2-user/
                         """
                         
-                        // Démarre l'application Java directement
+                        // Déploiement sécurisé
                         sh """
                             ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                # Arrête l'ancienne instance
-                                pkill -f "java -jar springboot-app" || true
-                                sleep 2
+                                set -e
+                                # Arrêt propre sur le port 8080
+                                if lsof -ti:8080; then
+                                    echo "Arrêt de l'application existante..."
+                                    kill $(lsof -ti:8080)
+                                    sleep 3
+                                fi
                                 
-                                # Démarre la nouvelle version
-                                nohup java -jar /home/ec2-user/springboot-app-1.0.0.jar --server.port=8080 > app.log 2>&1 &
-                                sleep 5
+                                # Démarrage
+                                echo "Démarrage de la nouvelle version..."
+                                nohup java -jar /home/ec2-user/${JAR_FILE} --server.port=8080 > app.log 2>&1 &
+                                sleep 10
                                 
-                                # Vérifie que l'application démarre
+                                # Vérification
                                 curl -f http://localhost:8080/actuator/health || exit 1
+                                echo "✅ Application démarrée avec succès"
                             '
                         """
                     }
@@ -61,8 +72,9 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo "🧪 Test de santé de l'application: http://${STAGING_SERVER_IP}:8080/actuator/health"
-                        curl -s --retry 10 --retry-delay 5 --retry-all-errors -f http://${STAGING_SERVER_IP}:8080/actuator/health || exit 1
+                        set -e
+                        echo "🧪 Test de santé de l'application..."
+                        curl -s --retry 10 --retry-delay 5 --retry-all-errors -f http://${STAGING_SERVER_IP}:8080/actuator/health
                         echo "✅ Application déployée avec succès!"
                     """
                 }
@@ -76,6 +88,13 @@ pipeline {
                 channel: '#jenkins-ci',
                 color: 'good',
                 message: "✅ SUCCÈS - Application déployée sur http://${STAGING_SERVER_IP}:8080"
+            )
+        }
+        failure {
+            slackSend (
+                channel: '#jenkins-ci',
+                color: 'danger',
+                message: "❌ ÉCHEC - Déploiement échoué sur ${STAGING_SERVER_IP}"
             )
         }
     }
