@@ -2,8 +2,9 @@ pipeline {
     agent any
     
     environment {
-        STAGING_SERVER_IP = '3.27.255.232'  // ← NOUVELLE IP ICI
-        STAGING_SSH_CREDENTIALS = 'ec2-production-key'
+        STAGING_SERVER_IP = '3.27.255.232'
+        // Assurez-vous que cet ID correspond exactement à Jenkins
+        STAGING_SSH_CREDENTIALS = 'ec2-production-key' 
     }
     
     stages {
@@ -23,6 +24,26 @@ pipeline {
             steps {
                 sh 'mvn package -DskipTests'
                 archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+                script {
+                    // Trouve dynamiquement le fichier JAR
+                    JAR_FILE = sh(script: 'find target -name "*.jar" | head -1', returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Install Java on Staging') {
+            steps {
+                script {
+                    echo "📦 Installation de Java sur le serveur staging..."
+                    sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
+                                sudo yum install java-17-amazon-corretto -y
+                                java -version
+                            '
+                        """
+                    }
+                }
             }
         }
 
@@ -30,25 +51,28 @@ pipeline {
             steps {
                 script {
                     echo "🚀 Déploiement sur Staging (${STAGING_SERVER_IP})..."
-                    sshagent(["${STAGING_SSH_CREDENTIALS}"]) {
-                        // Copie le JAR sur le serveur
+                    sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
+                        // Copie le JAR
                         sh """
-                            scp -o StrictHostKeyChecking=no target/springboot-app-1.0.0.jar ec2-user@${STAGING_SERVER_IP}:/home/ec2-user/
+                            scp -o StrictHostKeyChecking=no ${JAR_FILE} ec2-user@${STAGING_SERVER_IP}:/home/ec2-user/
                         """
                         
                         // Démarre l'application
                         sh """
                             ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                # Arrête l'ancienne instance
-                                pkill -f "java -jar springboot-app" || true
-                                sleep 2
+                                # Arrêt propre
+                                if pgrep -f "java.*springboot-app"; then
+                                    pkill -f "java.*springboot-app"
+                                    sleep 3
+                                fi
                                 
-                                # Démarre la nouvelle version
-                                nohup java -jar /home/ec2-user/springboot-app-1.0.0.jar --server.port=8080 > app.log 2>&1 &
-                                sleep 5
+                                # Démarrage
+                                nohup java -jar /home/ec2-user/${JAR_FILE} --server.port=8080 > app.log 2>&1 &
+                                sleep 10
                                 
-                                # Vérifie que l'application démarre
+                                # Vérification
                                 curl -f http://localhost:8080/actuator/health || exit 1
+                                echo "✅ Application démarrée avec succès"
                             '
                         """
                     }
@@ -60,9 +84,16 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo "🧪 Test de santé de l'application: http://${STAGING_SERVER_IP}:8080/actuator/health"
-                        curl -s --retry 10 --retry-delay 5 --retry-all-errors -f http://${STAGING_SERVER_IP}:8080/actuator/health || exit 1
-                        echo "✅ Application déployée avec succès!"
+                        echo "🧪 Test de santé de l'application..."
+                        for i in {1..10}; do
+                            if curl -s -f http://${STAGING_SERVER_IP}:8080/actuator/health; then
+                                echo "✅ Application déployée avec succès!"
+                                exit 0
+                            fi
+                            sleep 5
+                        done
+                        echo "❌ L'application ne répond pas"
+                        exit 1
                     """
                 }
             }
@@ -75,6 +106,13 @@ pipeline {
                 channel: '#jenkins-ci',
                 color: 'good',
                 message: "✅ SUCCÈS - Application déployée sur http://${STAGING_SERVER_IP}:8080"
+            )
+        }
+        failure {
+            slackSend (
+                channel: '#jenkins-ci',
+                color: 'danger',
+                message: "❌ ÉCHEC - Déploiement échoué sur ${STAGING_SERVER_IP}"
             )
         }
     }
