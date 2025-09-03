@@ -31,22 +31,37 @@ pipeline {
         }
 
         stage('Build Docker Image') {
+            agent {
+                docker {
+                    image 'docker:20.10-dind'
+                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 script {
-                    echo "🐳 Building Docker image..."
-                    sh 'sudo docker build -t gseha/springboot-app:latest .'
+                    echo "🐳 Building Docker image using DinD..."
+                    sh 'docker build -t gseha/springboot-app:latest .'
                 }
             }
         }
 
         stage('Push to Docker Hub') {
+            agent {
+                docker {
+                    image 'docker:20.10-dind'
+                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 script {
                     echo "📤 Pushing Docker image to Docker Hub..."
                     withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                         sh '''
-                            echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
-                            sudo docker push gseha/springboot-app:latest
+                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                            docker push gseha/springboot-app:latest
+                            docker logout
                         '''
                     }
                 }
