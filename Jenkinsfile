@@ -4,7 +4,7 @@ pipeline {
     environment {
         STAGING_SERVER_IP = '3.27.255.232'
         STAGING_SSH_CREDENTIALS = 'ec2-production-key'
-        DOCKERHUB_CREDENTIALS = 'docker-hub'  // ← Changé pour utiliser votre credential existant
+        DOCKERHUB_CREDENTIALS = 'docker-hub'
     }
     
     stages {
@@ -30,12 +30,11 @@ pipeline {
             }
         }
 
-        // ========== ÉTAPES DOCKER ==========
         stage('Build Docker Image') {
             steps {
                 script {
                     echo "🐳 Building Docker image..."
-                    sh 'docker build -t gseha/springboot-app:latest .'
+                    sh 'sudo docker build -t gseha/springboot-app:latest .'
                 }
             }
         }
@@ -46,14 +45,13 @@ pipeline {
                     echo "📤 Pushing Docker image to Docker Hub..."
                     withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                         sh '''
-                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-                            docker push gseha/springboot-app:latest
+                            echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
+                            sudo docker push gseha/springboot-app:latest
                         '''
                     }
                 }
             }
         }
-        // ====================================
 
         stage('Install Java on Staging') {
             steps {
