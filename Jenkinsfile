@@ -6,7 +6,6 @@ pipeline {
         STAGING_SSH_CREDENTIALS = 'ec2-production-key'
         DOCKERHUB_CREDENTIALS = 'docker-hub'
         SLACK_CHANNEL = '#jenkins-ci'
-        APP_PORT = '8090'
     }
     
     stages {
@@ -46,6 +45,7 @@ pipeline {
                         sh """
                             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin || echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
                             docker push gseha/springboot-app:latest || sudo docker push gseha/springboot-app:latest
+                            docker push gseha/springboot-app:${DOCKER_TAG} || sudo docker push gseha/springboot-app:${DOCKER_TAG}
                             docker logout || sudo docker logout
                         """
                     }
@@ -59,21 +59,16 @@ pipeline {
                     sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                # Arrêter le conteneur existant
+                                echo "🚀 Starting deployment..."
                                 sudo docker stop springboot-app || true
                                 sudo docker rm springboot-app || true
-                                
-                                # Pull de la nouvelle image
                                 sudo docker pull gseha/springboot-app:latest
-                                
-                                # Démarrer le nouveau conteneur sur le port 8090
                                 sudo docker run -d \\
                                     --name springboot-app \\
-                                    -p ${APP_PORT}:8080 \\
+                                    -p 80:8080 \\
                                     -e SPRING_PROFILES_ACTIVE=staging \\
                                     gseha/springboot-app:latest
-                                
-                                echo "✅ Application déployée sur le port ${APP_PORT}"
+                                echo "✅ Application deployed successfully"
                             '
                         """
                     }
@@ -84,14 +79,14 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 script {
-                    echo "🧪 Test de santé de l'application sur le port ${APP_PORT}..."
+                    echo "🧪 Testing application health..."
                     retry(5) {
                         sleep 10
                         sh """
-                            curl -s -f http://${STAGING_SERVER_IP}:${APP_PORT}/actuator/health || exit 1
+                            curl -s -f http://${STAGING_SERVER_IP}/actuator/health || exit 1
                         """
                     }
-                    echo "✅ Application fonctionne correctement sur http://${STAGING_SERVER_IP}:${APP_PORT}"
+                    echo "✅ Application is running successfully at http://${STAGING_SERVER_IP}"
                 }
             }
         }
@@ -102,15 +97,21 @@ pipeline {
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'good',
-                message: "✅ SUCCÈS - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Application déployée sur http://${STAGING_SERVER_IP}:${APP_PORT}"
+                message: "✅ SUCCESS - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Application deployed to http://${STAGING_SERVER_IP}"
             )
         }
         failure {
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger',
-                message: "❌ ÉCHEC - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Déploiement échoué"
+                message: "❌ FAILED - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Deployment failed"
             )
+        }
+        always {
+            script {
+                // Cleanup
+                sh 'docker system prune -f || sudo docker system prune -f || true'
+            }
         }
     }
 }
