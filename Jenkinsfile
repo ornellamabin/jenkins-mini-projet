@@ -12,6 +12,12 @@ pipeline {
         stage('Checkout SCM') {
             steps {
                 checkout scm
+                script {
+                    // Nettoyer les caractères non-UTF-8
+                    sh '''
+                        find . -name "*.java" -exec sed -i "s/[^[:print:]]//g" {} \\;
+                    '''
+                }
             }
         }
 
@@ -22,6 +28,7 @@ pipeline {
             post {
                 always {
                     junit '**/target/surefire-reports/*.xml'
+                    archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
                 }
             }
         }
@@ -31,8 +38,10 @@ pipeline {
                 script {
                     DOCKER_TAG = "build-${env.BUILD_NUMBER}"
                     sh """
-                        docker build -t gseha/springboot-app:${DOCKER_TAG} . || sudo docker build -t gseha/springboot-app:${DOCKER_TAG} .
-                        docker tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest || sudo docker tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest
+                        echo "🐳 Building Docker image with tag: ${DOCKER_TAG}"
+                        docker build -t gseha/springboot-app:${DOCKER_TAG} .
+                        docker tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest
+                        echo "✅ Docker image built successfully"
                     """
                 }
             }
@@ -41,12 +50,43 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    withCredentials([usernamePassword(
+                        credentialsId: "${DOCKERHUB_CREDENTIALS}", 
+                        usernameVariable: 'DOCKER_USERNAME', 
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
                         sh """
-                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin || echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
-                            docker push gseha/springboot-app:latest || sudo docker push gseha/springboot-app:latest
-                            docker push gseha/springboot-app:${DOCKER_TAG} || sudo docker push gseha/springboot-app:${DOCKER_TAG}
-                            docker logout || sudo docker logout
+                            echo "📤 Pushing to Docker Hub as user: \$DOCKER_USERNAME"
+                            
+                            # Authentification
+                            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
+                            
+                            # Push des images avec retry
+                            push_image() {
+                                local image=\$1
+                                local attempts=3
+                                local count=1
+                                
+                                while [ \$count -le \$attempts ]; do
+                                    echo "Attempt \$count: Pushing \$image"
+                                    if docker push \$image; then
+                                        echo "✅ Success: \$image"
+                                        return 0
+                                    fi
+                                    echo "⚠️ Attempt \$count failed"
+                                    count=\$((count + 1))
+                                    sleep 5
+                                done
+                                echo "❌ Failed to push \$image"
+                                return 1
+                            }
+                            
+                            push_image "gseha/springboot-app:latest"
+                            push_image "gseha/springboot-app:${DOCKER_TAG}"
+                            
+                            # Nettoyage
+                            docker logout
+                            echo "🎉 All images pushed successfully to Docker Hub"
                         """
                     }
                 }
@@ -58,17 +98,28 @@ pipeline {
                 script {
                     sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
                         sh """
+                            echo "🚀 Deploying to staging server: ${STAGING_SERVER_IP}"
                             ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                echo "🚀 Starting deployment..."
-                                sudo docker stop springboot-app || true
-                                sudo docker rm springboot-app || true
+                                echo "Starting deployment process..."
+                                
+                                # Arrêter et nettoyer l'ancien conteneur
+                                sudo docker stop springboot-app 2>/dev/null || true
+                                sudo docker rm springboot-app 2>/dev/null || true
+                                
+                                # Pull de la nouvelle image
+                                echo "Pulling latest image from Docker Hub..."
                                 sudo docker pull gseha/springboot-app:latest
+                                
+                                # Démarrer le nouveau conteneur
+                                echo "Starting new container..."
                                 sudo docker run -d \\
                                     --name springboot-app \\
                                     -p 80:8080 \\
                                     -e SPRING_PROFILES_ACTIVE=staging \\
+                                    --restart unless-stopped \\
                                     gseha/springboot-app:latest
-                                echo "✅ Application deployed successfully"
+                                
+                                echo "✅ Deployment completed successfully"
                             '
                         """
                     }
@@ -79,38 +130,85 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 script {
-                    echo "🧪 Testing application health..."
+                    echo "🧪 Performing smoke test on staging server"
                     retry(5) {
                         sleep 10
                         sh """
-                            curl -s -f http://${STAGING_SERVER_IP}/actuator/health || exit 1
+                            echo "Testing application health..."
+                            response=\$(curl -s -f http://${STAGING_SERVER_IP}/actuator/health || echo "FAILED")
+                            if [ "\$response" = "FAILED" ]; then
+                                echo "❌ Health check failed"
+                                exit 1
+                            fi
+                            echo "✅ Health check response: \$response"
                         """
                     }
-                    echo "✅ Application is running successfully at http://${STAGING_SERVER_IP}"
+                    echo "🎯 Application is healthy and running at http://${STAGING_SERVER_IP}"
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    try {
+                        withSonarQubeEnv('sonarcloud') {
+                            sh 'mvn sonar:sonar -Dsonar.projectKey=springboot-app -Dsonar.organization=gseha'
+                        }
+                    } catch (Exception e) {
+                        echo "⚠️ SonarQube analysis skipped or failed: ${e.getMessage()}"
+                        // Continuer même si SonarQube échoue
+                    }
                 }
             }
         }
     }
     
     post {
-        success {
-            slackSend (
-                channel: "${SLACK_CHANNEL}",
-                color: 'good',
-                message: "✅ SUCCESS - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Application deployed to http://${STAGING_SERVER_IP}"
-            )
-        }
-        failure {
-            slackSend (
-                channel: "${SLACK_CHANNEL}",
-                color: 'danger',
-                message: "❌ FAILED - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} - Deployment failed"
-            )
-        }
         always {
             script {
-                // Cleanup
-                sh 'docker system prune -f || sudo docker system prune -f || true'
+                echo "🧹 Cleaning up Docker resources"
+                sh 'docker system prune -f 2>/dev/null || true'
+            }
+        }
+        success {
+            script {
+                def message = """✅ SUCCESS - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Application: http://${STAGING_SERVER_IP}
+• Docker Image: gseha/springboot-app:${DOCKER_TAG}
+• Branch: ${env.BRANCH_NAME}"""
+                
+                slackSend (
+                    channel: "${SLACK_CHANNEL}",
+                    color: 'good',
+                    message: message
+                )
+            }
+        }
+        failure {
+            script {
+                def message = """❌ FAILED - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Branch: ${env.BRANCH_NAME}
+• Build URL: ${env.BUILD_URL}"""
+                
+                slackSend (
+                    channel: "${SLACK_CHANNEL}",
+                    color: 'danger',
+                    message: message
+                )
+            }
+        }
+        unstable {
+            script {
+                def message = """⚠️ UNSTABLE - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER}
+• Branch: ${env.BRANCH_NAME}
+• Build URL: ${env.BUILD_URL}"""
+                
+                slackSend (
+                    channel: "${SLACK_CHANNEL}",
+                    color: 'warning',
+                    message: message
+                )
             }
         }
     }
