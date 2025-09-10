@@ -3,8 +3,12 @@ pipeline {
     
     environment {
         STAGING_SERVER_IP = '3.27.255.232'
+        PRODUCTION_SERVER_IP = 'votre-ip-production'
         STAGING_SSH_CREDENTIALS = 'ec2-production-key'
+        PRODUCTION_SSH_CREDENTIALS = 'ec2-production-key'
         DOCKERHUB_CREDENTIALS = 'docker-hub'
+        SONAR_TOKEN = credentials('sonar-token')
+        SLACK_CHANNEL = '#jenkins-ci'
     }
     
     stages {
@@ -15,69 +19,76 @@ pipeline {
         }
 
         stage('Build & Test') {
+            agent {
+                docker {
+                    image 'maven:3.8.6-openjdk-17'
+                    args '-v /root/.m2:/root/.m2'
+                }
+            }
             steps {
                 sh 'mvn clean compile test'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                    archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            agent {
+                docker {
+                    image 'maven:3.8.6-openjdk-17'
+                    args '-v /root/.m2:/root/.m2'
+                }
+            }
+            steps {
+                withSonarQubeEnv('sonarcloud') {
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=votre-project-key -Dsonar.organization=votre-organisation'
+                }
             }
         }
 
         stage('Package Application') {
+            agent {
+                docker {
+                    image 'maven:3.8.6-openjdk-17'
+                    args '-v /root/.m2:/root/.m2'
+                }
+            }
             steps {
                 sh 'mvn package -DskipTests'
-                archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
                 script {
                     JAR_FILE = sh(script: 'find target -name "*.jar" | head -1', returnStdout: true).trim()
+                    DOCKER_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
                 }
             }
         }
 
         stage('Build Docker Image') {
-            agent {
-                docker {
-                    image 'docker:20.10-dind'
-                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
-                    reuseNode true
-                }
-            }
             steps {
                 script {
-                    echo "🐳 Building Docker image using DinD..."
-                    sh 'docker build -t gseha/springboot-app:latest .'
+                    echo "🐳 Building Docker image..."
+                    // Utiliser Docker directement depuis le host
+                    sh """
+                        sudo docker build -t gseha/springboot-app:${DOCKER_TAG} .
+                        sudo docker tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest
+                    """
                 }
             }
         }
 
         stage('Push to Docker Hub') {
-            agent {
-                docker {
-                    image 'docker:20.10-dind'
-                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
-                    reuseNode true
-                }
-            }
             steps {
                 script {
                     echo "📤 Pushing Docker image to Docker Hub..."
                     withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                        sh '''
-                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-                            docker push gseha/springboot-app:latest
-                            docker logout
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('Install Java on Staging') {
-            steps {
-                script {
-                    echo "📦 Installation de Java sur le serveur staging..."
-                    sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                sudo yum install java-17-amazon-corretto -y
-                                java -version
-                            '
+                            echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
+                            sudo docker push gseha/springboot-app:latest
+                            sudo docker push gseha/springboot-app:${DOCKER_TAG}
+                            sudo docker logout
                         """
                     }
                 }
@@ -90,21 +101,27 @@ pipeline {
                     echo "🚀 Déploiement sur Staging (${STAGING_SERVER_IP})..."
                     sshagent(credentials: ["${STAGING_SSH_CREDENTIALS}"]) {
                         sh """
-                            scp -o StrictHostKeyChecking=no ${JAR_FILE} ec2-user@${STAGING_SERVER_IP}:/home/ec2-user/
-                        """
-                        
-                        sh """
                             ssh -o StrictHostKeyChecking=no ec2-user@${STAGING_SERVER_IP} '
-                                if pgrep -f "java.*springboot-app"; then
-                                    pkill -f "java.*springboot-app"
-                                    sleep 3
+                                # Vérifier si Docker est installé
+                                if ! command -v docker &> /dev/null; then
+                                    sudo yum install docker -y
+                                    sudo service docker start
+                                    sudo usermod -a -G docker ec2-user
                                 fi
                                 
-                                nohup java -jar /home/ec2-user/${JAR_FILE} --server.port=8080 > app.log 2>&1 &
-                                sleep 10
+                                # Arrêter le conteneur existant
+                                sudo docker stop springboot-app || true
+                                sudo docker rm springboot-app || true
                                 
-                                curl -f http://localhost:8080/actuator/health || exit 1
-                                echo "✅ Application démarrée avec succès"
+                                # Pull de la nouvelle image
+                                sudo docker pull gseha/springboot-app:${DOCKER_TAG}
+                                
+                                # Démarrer le nouveau conteneur
+                                sudo docker run -d \
+                                    --name springboot-app \
+                                    -p 8080:8080 \
+                                    -e SPRING_PROFILES_ACTIVE=staging \
+                                    gseha/springboot-app:${DOCKER_TAG}
                             '
                         """
                     }
@@ -112,39 +129,46 @@ pipeline {
             }
         }
 
-        stage('Smoke Test') {
+        stage('Staging Smoke Test') {
             steps {
                 script {
-                    sh """
-                        echo "🧪 Test de santé de l'application..."
-                        for i in {1..10}; do
-                            if curl -s -f http://${STAGING_SERVER_IP}:8080/actuator/health; then
-                                echo "✅ Application déployée avec succès!"
-                                exit 0
-                            fi
-                            sleep 5
-                        done
-                        echo "❌ L'application ne répond pas"
-                        exit 1
-                    """
+                    echo "🧪 Test de santé de l'application sur staging..."
+                    retry(5) {
+                        sleep 10
+                        sh """
+                            curl -s -f http://${STAGING_SERVER_IP}:8080/actuator/health || exit 1
+                        """
+                    }
+                    echo "✅ Application déployée avec succès sur staging!"
                 }
             }
         }
     }
     
     post {
+        always {
+            script {
+                // Nettoyage des ressources Docker
+                sh 'sudo docker system prune -f || true'
+            }
+        }
         success {
-            slackSend (
-                channel: '#jenkins-ci',
-                color: 'good',
-                message: "✅ SUCCÈS - Application déployée sur http://${STAGING_SERVER_IP}:8080"
-            )
+            script {
+                def message = "✅ SUCCÈS - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME})"
+                message += " - Déployé sur staging: http://${STAGING_SERVER_IP}:8080"
+                
+                slackSend (
+                    channel: "${SLACK_CHANNEL}",
+                    color: 'good',
+                    message: message
+                )
+            }
         }
         failure {
             slackSend (
-                channel: '#jenkins-ci',
+                channel: "${SLACK_CHANNEL}",
                 color: 'danger',
-                message: "❌ ÉCHEC - Déploiement échoué sur ${STAGING_SERVER_IP}"
+                message: "❌ ÉCHEC - Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BRANCH_NAME})"
             )
         }
     }
