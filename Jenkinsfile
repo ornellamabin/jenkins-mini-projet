@@ -16,6 +16,12 @@ pipeline {
         }
 
         stage('Build & Test') {
+            agent {
+                docker {
+                    image 'maven:3.8.6-openjdk-17'
+                    args '-v /root/.m2:/root/.m2'
+                }
+            }
             steps {
                 sh 'mvn clean compile test'
             }
@@ -27,36 +33,34 @@ pipeline {
         }
 
         stage('Build Docker Image') {
+            agent {
+                docker {
+                    image 'docker:20.10-dind'
+                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 script {
                     DOCKER_TAG = "build-${env.BUILD_NUMBER}"
                     sh """
-                        echo "🐳 Building Docker image..."
-                        
-                        # Déterminer la commande Docker à utiliser
-                        if docker info >/dev/null 2>&1; then
-                            echo "✅ Docker accessible directement"
-                            DOCKER_CMD="docker"
-                        else
-                            echo "⚠️ Utilisation de sudo pour Docker"
-                            DOCKER_CMD="sudo docker"
-                            
-                            # Tentative de résolution des permissions
-                            sudo usermod -a -G docker \$USER 2>/dev/null || true
-                            sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
-                        fi
-                        
-                        # Construction de l'image
-                        \$DOCKER_CMD build -t gseha/springboot-app:${DOCKER_TAG} .
-                        \$DOCKER_CMD tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest
-                        
-                        echo "✅ Image Docker construite avec succès"
+                        echo "🐳 Building Docker image using DinD..."
+                        docker build -t gseha/springboot-app:${DOCKER_TAG} .
+                        docker tag gseha/springboot-app:${DOCKER_TAG} gseha/springboot-app:latest
+                        echo "✅ Docker image built successfully"
                     """
                 }
             }
         }
 
         stage('Push to Docker Hub') {
+            agent {
+                docker {
+                    image 'docker:20.10-dind'
+                    args '--privileged --network host -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 script {
                     withCredentials([usernamePassword(
@@ -65,25 +69,12 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )]) {
                         sh """
-                            echo "📤 Pushing to Docker Hub..."
-                            
-                            # Déterminer la commande Docker
-                            if docker info >/dev/null 2>&1; then
-                                DOCKER_CMD="docker"
-                            else
-                                DOCKER_CMD="sudo docker"
-                            fi
-                            
-                            # Authentification
-                            echo "\$DOCKER_PASSWORD" | \$DOCKER_CMD login -u "\$DOCKER_USERNAME" --password-stdin
-                            
-                            # Push des images
-                            \$DOCKER_CMD push gseha/springboot-app:latest
-                            \$DOCKER_CMD push gseha/springboot-app:${DOCKER_TAG}
-                            
-                            # Nettoyage
-                            \$DOCKER_CMD logout
-                            echo "✅ Images pushed successfully"
+                            echo "📤 Pushing to Docker Hub as user: \$DOCKER_USERNAME"
+                            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
+                            docker push gseha/springboot-app:latest
+                            docker push gseha/springboot-app:${DOCKER_TAG}
+                            docker logout
+                            echo "✅ Images pushed successfully to Docker Hub"
                         """
                     }
                 }
@@ -116,13 +107,14 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 script {
+                    echo "🧪 Testing application health..."
                     retry(5) {
                         sleep 10
                         sh """
                             curl -s -f http://${STAGING_SERVER_IP}/actuator/health || exit 1
                         """
                     }
-                    echo "✅ Application is healthy"
+                    echo "✅ Application is healthy at http://${STAGING_SERVER_IP}"
                 }
             }
         }
